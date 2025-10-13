@@ -1,0 +1,9 @@
+PyQt6
+SQLAlchemy
+psycopg2
+pandas
+numpy
+PyPortfolioOpt
+matplotlib
+reportlab
+apscheduler
