@@ -1,4 +1,12 @@
-# Entry point for DELTA Portfolio
+from PyQt6.QtWidgets import QApplication
+import sys
+from ui.main_window import MainWindow
 
-if __name__ == '__main__':
-    print('🚀 DELTA Portfolio starting...')
+def main():
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.showMaximized()  # открываем во весь экран
+    sys.exit(app.exec())
+
+if __name__ == "__main__":
+    main()
