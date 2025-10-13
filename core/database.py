@@ -59,6 +59,13 @@ class FundamentalData(Base):
     pb_ratio = Column(Float)
     ev_ebitda = Column(Float)
     fcf_yield = Column(Float)
+    dividend_yield = Column(Float)
+    eps = Column(Float)
+    roe = Column(Float)
+    roa = Column(Float)
+    gross_margin = Column(Float)
+    operating_margin = Column(Float)
+    net_margin = Column(Float)
     raw_json = Column(JSON)
 
 
