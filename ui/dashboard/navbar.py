@@ -1,19 +1,18 @@
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel, QSizePolicy
 
-TABS = ["Global Mkt", "Global ETF", "My Stocks", "News", "Analysis", "Credits",
-        "Charts", "Analyst Pg", "Worksheet", "Activity", "Equity", "FX", "Options"]
+TABS = ["Home", "Portfolios", "Instruments", "Charts", "News", "Fundamentals", "Options"]
 
 class NavBar(QWidget):
     def __init__(self):
         super().__init__()
         row = QHBoxLayout(self)
         row.setContentsMargins(6, 6, 6, 6)
-        row.setSpacing(6)
+        row.setSpacing(10)
 
         burger = QPushButton("≡")
-        burger.setFixedWidth(36)
-        title = QLabel("DELTA Portfolio")
-        title.setStyleSheet("font-weight:600; color:#A2DD84;")
+        burger.setFixedWidth(40)
+        title = QLabel("DELTA TERMINAL")
+        title.setStyleSheet("background: transparent; border: none; font-weight:600; color:#A2DD84; font-size:15px;")
         title.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
 
         row.addWidget(burger)
@@ -22,7 +21,10 @@ class NavBar(QWidget):
         for t in TABS:
             btn = QPushButton(t)
             btn.setCheckable(True)
-            if t == "Equity":
+            btn.setMinimumWidth(120)
+            btn.setMinimumHeight(36)
+            btn.setStyleSheet("font-size:13px; font-weight:500;")
+            if t == "Home":
                 btn.setChecked(True)
             row.addWidget(btn)
 
