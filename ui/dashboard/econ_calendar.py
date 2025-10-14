@@ -19,7 +19,7 @@ class EconomicCalendarPanel(QWidget):
         title = QLabel("Economic Calendar")
         title.setStyleSheet("""
             color: #FFFFFF;
-            font-size: 14px;
+            font-size: 12px;
             font-weight: 600;
             background: transparent; 
             border: none;

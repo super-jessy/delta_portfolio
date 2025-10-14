@@ -15,7 +15,7 @@ class NewsPanel(QWidget):
 
         # Заголовок
         self.title = QLabel("News")
-        self.title.setStyleSheet("background: transparent; border: none; font-weight: bold; font-size: 13px;")
+        self.title.setStyleSheet("background: transparent; border: none; font-weight: bold; font-size: 12px;")
         layout.addWidget(self.title)
 
         # Скролл

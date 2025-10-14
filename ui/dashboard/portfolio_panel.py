@@ -97,7 +97,7 @@ class PortfolioPanel(QWidget):
 
         title = QLabel("Portfolio Overview")
         title.setFont(QFont("Helvetica Neue", 14, QFont.Weight.Medium))
-        title.setStyleSheet("background: transparent; border: none; font-weight: bold; padding-top: 0px;")
+        title.setStyleSheet("background: transparent; border: none; font-weight: bold; padding-top: 0px; font-size: 12px;")
 
         combo = QComboBox()
         combo.addItems(["Main Portfolio", "Tech Stocks", "Dividend Fund"])
