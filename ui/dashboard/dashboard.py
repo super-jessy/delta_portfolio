@@ -25,7 +25,7 @@ class DashboardPage(QWidget):
 
         left = FrameWrap(PortfolioPanel(), stretch=4, margins=(8, 0, 8, 8))
         left.layout().setAlignment(Qt.AlignmentFlag.AlignTop)
-        right = FrameWrap(ChartPanel(), stretch=8)
+        right = FrameWrap(ChartPanel(), stretch=8, margins=(8, 0, 0, 0))
 
         middle.addWidget(left, left.stretch)
         middle.addWidget(right, right.stretch)
