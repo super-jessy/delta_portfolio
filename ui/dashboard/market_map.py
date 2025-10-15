@@ -17,7 +17,7 @@ class ChartCanvas(QWidget):
         self.margin_left = 15
         self.margin_right = 45  # увеличено под шкалу %
         self.margin_top = 25
-        self.margin_bottom = 20
+        self.margin_bottom = 10
 
         self.font = QFont("Helvetica Neue", 9)
 
@@ -81,7 +81,7 @@ class ChartCanvas(QWidget):
         # ось X — подняли значения ближе к линии
         for i in range(6):
             x = int(left + (i * width / 5))
-            painter.drawText(x - 12, int(top + height + 15), f"{i*4:02d}:00")
+            #painter.drawText(x - 12, int(top + height + 15), f"{i*4:02d}:00")
 
 
     def draw_lines(self, painter, rect):
