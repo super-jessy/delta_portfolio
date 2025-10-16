@@ -16,9 +16,6 @@ class DashboardPage(QWidget):
         root.setContentsMargins(10, 10, 10, 10)
         root.setSpacing(8)
 
-        # Навигация
-        root.addWidget(NavBar())
-
         # Центральная зона: Portfolio (слева) | Chart (справа)
         middle = QHBoxLayout()
         middle.setSpacing(8)
