@@ -1,14 +1,12 @@
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QLabel,
-    QTextEdit, QFrame, QSplitter, QSizePolicy
+    QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
+    QLabel, QTextEdit, QFrame, QLineEdit
 )
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt
 import psycopg2
 import os
 from dotenv import load_dotenv
-import io
-import requests
 
 # ────────────────────────────────────────────────
 # Настройки подключения к БД
@@ -28,18 +26,84 @@ class InstrumentsPage(QWidget):
     def __init__(self):
         super().__init__()
 
-        # Главный layout — горизонтальный (4 окна)
+        # ───── Главный горизонтальный layout ─────
         main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
 
-        # ───── 1. Список инструментов ─────
-        self.list_widget = QListWidget()
-        self.list_widget.setMinimumWidth(200)
-        self.list_widget.itemClicked.connect(self.load_instrument_details)
-        main_layout.addWidget(self.list_widget)
+        # ───── Левая часть (поиск + таблица инструментов) ─────
+        left_frame = QFrame()
+        left_layout = QVBoxLayout(left_frame)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(5)
 
-        # ───── 2. Окно информации ─────
+        # ─── Строка поиска ───
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search instrument...")
+        self.search_input.textChanged.connect(self.filter_tickers)
+        self.search_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #222222;
+                color: white;
+                border: 1px solid #444;
+                border-radius: 4px;
+                padding: 6px 8px;
+                font-size: 13px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #A2DD84;
+                outline: none;
+            }
+        """)
+        left_layout.addWidget(self.search_input)
+
+        # ─── Таблица инструментов ───
+        self.table_widget = QTableWidget()
+        self.table_widget.setColumnCount(2)
+        self.table_widget.setHorizontalHeaderLabels(["Ticker", "Company Name"])
+        self.table_widget.verticalHeader().setVisible(False)
+        self.table_widget.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table_widget.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table_widget.cellClicked.connect(self.load_instrument_details)
+
+        # Стиль DELTA
+        self.table_widget.setStyleSheet("""
+            QHeaderView::section {
+                background-color: #222222;
+                color: #A2DD84;
+                font-weight: bold;
+                border: none;
+                padding: 6px;
+            }
+            QTableWidget {
+                background-color: #222222;
+                color: white;
+                gridline-color: #333;
+                selection-background-color: #A2DD84;
+                selection-color: black;
+                font-size: 13px;
+                outline: none;
+            }
+            QTableWidget::item:hover {
+                background-color: #3B5530;
+            }
+        """)
+
+        left_layout.addWidget(self.table_widget)
+        main_layout.addWidget(left_frame, stretch=2)
+
+        # ───── Правая часть ─────
+        right_frame = QFrame()
+        right_layout = QVBoxLayout(right_frame)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(10)
+
+        # ─── Верхнее окно — информация об инструменте ───
         self.info_frame = QFrame()
         self.info_layout = QVBoxLayout(self.info_frame)
+        self.info_frame.setStyleSheet("background-color: #222222; border: 1px solid #333; border-radius: 6px;")
+        self.info_layout.setContentsMargins(15, 15, 15, 15)
+        self.info_layout.setSpacing(8)
 
         self.logo_label = QLabel()
         self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -51,10 +115,19 @@ class InstrumentsPage(QWidget):
         self.address_label = QLabel("Address: -")
         self.employees_label = QLabel("Employees: -")
 
+        for lbl in [self.name_label, self.market_cap_label, self.exchange_label, self.address_label, self.employees_label]:
+            lbl.setStyleSheet("color: white; font-size: 13px;")
+
         self.description_box = QTextEdit()
         self.description_box.setReadOnly(True)
-        self.description_box.setMinimumHeight(150)
-        self.description_box.setStyleSheet("background-color: #1E1E1E; color: #A2DD84;")
+        self.description_box.setMinimumHeight(120)
+        self.description_box.setStyleSheet("""
+            background-color: #222222;
+            color: #A2DD84;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 6px;
+        """)
 
         for w in [
             self.logo_label, self.name_label, self.market_cap_label,
@@ -63,18 +136,29 @@ class InstrumentsPage(QWidget):
         ]:
             self.info_layout.addWidget(w)
 
-        main_layout.addWidget(self.info_frame)
+        right_layout.addWidget(self.info_frame, stretch=2)
 
-        # ───── 3 и 4 окна (пока пустые) ─────
+        # ─── Нижняя часть — два статичных окна ───
+        bottom_layout = QHBoxLayout()
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.setSpacing(10)
+
         placeholder3 = QFrame()
-        placeholder3.setStyleSheet("background-color: #121212; border: 1px solid #333;")
+        placeholder3.setStyleSheet("background-color: #222222; border: 1px solid #333; border-radius: 6px;")
         placeholder4 = QFrame()
-        placeholder4.setStyleSheet("background-color: #121212; border: 1px solid #333;")
+        placeholder4.setStyleSheet("background-color: #222222; border: 1px solid #333; border-radius: 6px;")
 
-        main_layout.addWidget(placeholder3)
-        main_layout.addWidget(placeholder4)
+        bottom_layout.addWidget(placeholder3)
+        bottom_layout.addWidget(placeholder4)
+
+        bottom_wrapper = QFrame()
+        bottom_wrapper.setLayout(bottom_layout)
+        right_layout.addWidget(bottom_wrapper, stretch=1)
+
+        main_layout.addWidget(right_frame, stretch=3)
 
         # Загрузка тикеров при старте
+        self.all_tickers = []
         self.load_tickers()
 
     # ────────────────────────────────────────────────
@@ -89,17 +173,54 @@ class InstrumentsPage(QWidget):
             cur = conn.cursor()
             cur.execute("SELECT ticker, name FROM instruments ORDER BY ticker ASC;")
             rows = cur.fetchall()
-            for ticker, name in rows:
-                self.list_widget.addItem(f"{ticker} — {name}")
             conn.close()
+
+            self.all_tickers = rows  # сохраним для поиска
+            self.display_tickers(rows)
+
         except Exception as e:
-            self.list_widget.addItem(f"Ошибка загрузки: {e}")
+            print(f"Ошибка загрузки тикеров: {e}")
+
+    # ────────────────────────────────────────────────
+    # Отображение тикеров в таблице
+    # ────────────────────────────────────────────────
+    def display_tickers(self, rows):
+        self.table_widget.setRowCount(len(rows))
+        for i, (ticker, name) in enumerate(rows):
+            ticker_item = QTableWidgetItem(ticker)
+            name_item = QTableWidgetItem(name or "-")
+            ticker_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            name_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            self.table_widget.setItem(i, 0, ticker_item)
+            self.table_widget.setItem(i, 1, name_item)
+
+        self.table_widget.setColumnWidth(0, 90)
+        self.table_widget.horizontalHeader().setStretchLastSection(True)
+
+    # ────────────────────────────────────────────────
+    # Поиск и фильтрация тикеров
+    # ────────────────────────────────────────────────
+    def filter_tickers(self, text):
+        text = text.strip().lower()
+        if not text:
+            self.display_tickers(self.all_tickers)
+            return
+
+        filtered = [
+            (t, n) for (t, n) in self.all_tickers
+            if text in t.lower() or text in (n or "").lower()
+        ]
+        self.display_tickers(filtered)
 
     # ────────────────────────────────────────────────
     # Загрузка деталей выбранного инструмента
     # ────────────────────────────────────────────────
-    def load_instrument_details(self, item):
-        ticker = item.text().split(" — ")[0]
+    def load_instrument_details(self, row, column):
+        ticker_item = self.table_widget.item(row, 0)
+        if not ticker_item:
+            return
+        ticker = ticker_item.text()
+
         try:
             conn = psycopg2.connect(
                 host=PG_HOST, port=PG_PORT, dbname=PG_DB,
@@ -123,7 +244,6 @@ class InstrumentsPage(QWidget):
                 self.employees_label.setText(f"Employees: {employees or '-'}")
                 self.description_box.setPlainText(desc or "No description available.")
 
-                # Покажем логотип (если он есть)
                 if logo_data:
                     pixmap = QPixmap()
                     pixmap.loadFromData(logo_data)
