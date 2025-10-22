@@ -1,85 +1,103 @@
+# services/chart_service.py
 import os
-import hmac
-import json
-import base64
-import time
-import hashlib
-import asyncio
-import websockets
-import datetime
+import pandas as pd
+from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
+from datetime import datetime, timedelta
+from core.data_ingestion_ws import fetch_quote_history
 
 load_dotenv()
 
-FXOPEN_API_ID     = os.getenv("FXOPEN_API_ID")
-FXOPEN_API_KEY    = os.getenv("FXOPEN_API_KEY")
-FXOPEN_API_SECRET = os.getenv("FXOPEN_API_SECRET")
-FXOPEN_AUTH_TYPE  = os.getenv("FXOPEN_AUTH_TYPE", "HMAC")
+PG_HOST = os.getenv("PG_HOST")
+PG_PORT = os.getenv("PG_PORT")
+PG_DB = os.getenv("PG_DB")
+PG_USER = os.getenv("PG_USER")
+PG_PASSWORD = os.getenv("PG_PASSWORD")
 
-WS_URL = "wss://marginalttlivewebapi.fxopen.net/feed"
+DB_URL = f"postgresql+psycopg2://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG_DB}"
+engine = create_engine(DB_URL)
 
-
-def create_signature(timestamp: int, api_id: str, api_key: str, secret: str) -> str:
-    raw = f"{timestamp}{api_id}{api_key}".encode("utf-8")
-    digest = hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).digest()
-    return base64.b64encode(digest).decode("utf-8")
-
-
-async def _fetch_candles(symbol: str, timeframe: str):
-    results = []
-    try:
-        async with websockets.connect(WS_URL, ping_interval=None) as ws:
-            ts = int(time.time() * 1000)
-            signature = create_signature(ts, FXOPEN_API_ID, FXOPEN_API_KEY, FXOPEN_API_SECRET)
-
-            login_req = {
-                "Id": "LOGIN",
-                "Request": "Login",
-                "Params": {
-                    "AuthType": FXOPEN_AUTH_TYPE,
-                    "WebApiId": FXOPEN_API_ID,
-                    "WebApiKey": FXOPEN_API_KEY,
-                    "Timestamp": ts,
-                    "Signature": signature,
-                    "DeviceId": "DELTA-TERMINAL",
-                    "AppSessionId": "DELTA-PORTFOLIO"
-                }
-            }
-
-            await ws.send(json.dumps(login_req))
-            auth_resp = json.loads(await ws.recv())
-            if "Result" not in auth_resp:
-                raise Exception(f"Auth failed: {auth_resp}")
-
-            # 30 дней истории примерно
-            start_ts = int((datetime.datetime.utcnow() - datetime.timedelta(days=30)).timestamp() * 1000)
-
-            req = {
-                "Id": f"HISTORY-{symbol}",
-                "Request": "QuoteHistoryBars",
-                "Params": {
-                    "Symbol": symbol,
-                    "Periodicity": timeframe,
-                    "PriceType": "bid",
-                    "Timestamp": start_ts,
-                    "Count": 500
-                }
-            }
-
-            await ws.send(json.dumps(req))
-            resp = json.loads(await ws.recv())
-
-            bars = resp.get("Result", {}).get("Bars", [])
-            for bar in bars:
-                dt = datetime.datetime.utcfromtimestamp(bar["Timestamp"] / 1000)
-                results.append((dt, bar["Open"], bar["High"], bar["Low"], bar["Close"]))
-
-    except Exception as e:
-        print(f"[chart_service] error: {e}")
-
-    return results
+# === Обновление каждые 15 минут, независимо от ТФ ===
+REFRESH_PERIOD = timedelta(minutes=15)
 
 
 def fetch_candles(symbol: str, timeframe: str):
-    """Синхронный вызов для UI"""
-    return asyncio.run(_fetch_candles(symbol, timeframe))
+    """Возвращает свечи (datetime, open, high, low, close, volume) с проверкой и автодогрузкой"""
+    try:
+        with engine.connect() as conn:
+            query = text("""
+                SELECT datetime, open, high, low, close, volume
+                FROM instrument_quotes
+                WHERE ticker = :symbol AND timeframe = :tf
+                ORDER BY datetime ASC
+            """)
+            df = pd.read_sql(query, conn, params={"symbol": symbol, "tf": timeframe})
+    except Exception as e:
+        print(f"[chart_service] Ошибка при чтении из БД: {e}")
+        df = pd.DataFrame()
+
+    now = datetime.utcnow()
+
+    # === Если данных нет вообще — загружаем полную историю ===
+    if df.empty:
+        print(f"[chart_service] История отсутствует в БД для {symbol} ({timeframe}) → первичная загрузка...")
+        df_new = fetch_quote_history(symbol, timeframe)  # загрузим полные 1000 баров
+        if not df_new.empty:
+            save_to_db(df_new)
+            return _to_tuples(df_new)
+        else:
+            print(f"[chart_service] ❌ Не удалось получить историю для {symbol}")
+            return []
+
+    # === Проверяем, пора ли обновлять (каждые 15 минут) ===
+    last_dt = df["datetime"].max()
+    if now - last_dt >= REFRESH_PERIOD:
+        print(f"[chart_service] Обновляем {symbol} ({timeframe}) с {last_dt}")
+        df_new = fetch_quote_history(symbol, timeframe, since=last_dt)
+        if not df_new.empty:
+            save_to_db(df_new)
+            df = pd.concat([df, df_new]).drop_duplicates(subset="datetime").sort_values("datetime")
+        else:
+            print(f"[chart_service] ⚠️ FXOpen не вернул новых баров для {symbol}")
+
+    return _to_tuples(df)
+
+
+def _to_tuples(df: pd.DataFrame):
+    """Превращает DataFrame в список кортежей"""
+    return [
+        (row["datetime"], row["open"], row["high"], row["low"], row["close"])
+        for _, row in df.iterrows()
+    ]
+
+
+def save_to_db(df: pd.DataFrame):
+    """Сохраняет новые бары в instrument_quotes без дубликатов"""
+    if df.empty:
+        return
+
+    with engine.begin() as conn:
+        for ticker, tf in df[['ticker', 'timeframe']].drop_duplicates().itertuples(index=False):
+            # 1️⃣ Получаем уже существующие даты для этого тикера и ТФ
+            existing_dates = pd.read_sql(
+                text("""
+                    SELECT datetime FROM instrument_quotes
+                    WHERE ticker = :ticker AND timeframe = :tf
+                """),
+                conn,
+                params={"ticker": ticker, "tf": tf}
+            )['datetime'].astype('datetime64[ns]')
+
+            # 2️⃣ Фильтруем только новые строки
+            df_filtered = df[
+                (df['ticker'] == ticker) &
+                (df['timeframe'] == tf) &
+                (~df['datetime'].isin(existing_dates))
+            ]
+
+            # 3️⃣ Записываем только уникальные
+            if not df_filtered.empty:
+                df_filtered.to_sql("instrument_quotes", conn, if_exists="append", index=False)
+                print(f"[chart_service] Добавлено {len(df_filtered)} новых баров для {ticker} ({tf})")
+            else:
+                print(f"[chart_service] Нет новых баров для {ticker} ({tf}) — пропускаем.")

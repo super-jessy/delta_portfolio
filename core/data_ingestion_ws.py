@@ -30,7 +30,6 @@ DB_URL = f"postgresql+psycopg2://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG
 engine = create_engine(DB_URL)
 
 WS_URL = "wss://marginalttlivewebapi.fxopen.net/feed"
-TIMEFRAME = "M30"  # по умолчанию, можно менять
 
 # =======================================================
 # 🔐 Подпись HMAC
@@ -65,76 +64,149 @@ def get_last_datetime(ticker, timeframe):
 # =======================================================
 # 📡 Получение истории котировок
 # =======================================================
-def fetch_quote_history(symbol: str, timeframe: str = "D1", count: int = -2000, since: datetime | None = None):
+def fetch_quote_history(symbol: str, timeframe: str = "D1", since: datetime | None = None):
+    """
+    Загружает бары из FXOpen.
+    - Если since=None → загружает последние 1000 баров (исторические, Count=-1000)
+    - Если since задан → догружает новые бары вперёд по 1000 за итерацию (Count=1000)
+    """
     print(f"⏳ Подключаемся к WebSocket для {symbol} ({timeframe})...")
 
-    ws = create_connection(WS_URL)
-    timestamp = int(time.time() * 1000)
-    signature = create_signature(timestamp, FXOPEN_API_ID, FXOPEN_API_KEY, FXOPEN_API_SECRET)
+    all_data = []
+    total_bars = 0
+    iteration = 0
+    next_from = since
+    last_max_dt = None
 
-    login_msg = {
-        "Id": str(uuid4()),
-        "Request": "Login",
-        "Params": {
-            "AuthType": "HMAC",
-            "WebApiId": FXOPEN_API_ID,
-            "WebApiKey": FXOPEN_API_KEY,
-            "Timestamp": timestamp,
-            "Signature": signature,
-            "DeviceId": "DELTA_PORTFOLIO_APP",
-            "AppSessionId": "AUTO_UPDATE"
+    while True:
+        iteration += 1
+        ws = create_connection(WS_URL)
+        timestamp = int(time.time() * 1000)
+        signature = create_signature(timestamp, FXOPEN_API_ID, FXOPEN_API_KEY, FXOPEN_API_SECRET)
+
+        # --- Авторизация ---
+        login_msg = {
+            "Id": str(uuid4()),
+            "Request": "Login",
+            "Params": {
+                "AuthType": "HMAC",
+                "WebApiId": FXOPEN_API_ID,
+                "WebApiKey": FXOPEN_API_KEY,
+                "Timestamp": timestamp,
+                "Signature": signature,
+                "DeviceId": "DELTA_PORTFOLIO_APP",
+                "AppSessionId": "AUTO_UPDATE"
+            }
         }
-    }
+        ws.send(json.dumps(login_msg))
+        response = json.loads(ws.recv())
+        if response.get("Response") != "Login" or response.get("Result", {}).get("Info") != "ok":
+            print("❌ Ошибка авторизации:", response)
+            ws.close()
+            break
 
-    ws.send(json.dumps(login_msg))
-    response = json.loads(ws.recv())
-    if response.get("Response") != "Login" or response.get("Result", {}).get("Info") != "ok":
-        print("❌ Ошибка авторизации:", response)
+        # --- Формирование запроса ---
+        req_id = str(uuid4())
+        params = {
+            "Symbol": symbol,
+            "Periodicity": timeframe,
+            "PriceType": "bid",
+        }
+
+        if next_from is None:
+            # Первичная загрузка — 1000 баров назад
+            params["Count"] = -1000
+            params["Timestamp"] = int(time.time() * 1000)
+        else:
+            # Догрузка — по 1000 баров вперёд
+            params["Count"] = 1000
+            params["From"] = int(next_from.timestamp() * 1000)
+
+        ws.send(json.dumps({"Id": req_id, "Request": "QuoteHistoryBars", "Params": params}))
+        data = json.loads(ws.recv())
         ws.close()
+
+        bars = data.get("Result", {}).get("Bars", [])
+        if not bars:
+            print(f"⚙️ FXOpen не вернул данных для {symbol}")
+            break
+
+        # --- Преобразуем в DataFrame ---
+        df_part = pd.DataFrame(bars)
+        df_part["datetime"] = pd.to_datetime(df_part["Timestamp"], unit="ms")
+
+        # --- защита от зацикливания ---
+        current_max_dt = df_part["datetime"].max()
+        if last_max_dt and current_max_dt <= last_max_dt:
+            print(f"⚠️ FXOpen вернул те же бары ({current_max_dt}), прерываем.")
+            break
+        last_max_dt = current_max_dt
+
+        df_part["ticker"] = symbol
+        df_part["timeframe"] = timeframe
+        df_part.rename(columns={
+            "Open": "open",
+            "High": "high",
+            "Low": "low",
+            "Close": "close",
+            "Volume": "volume"
+        }, inplace=True)
+        df_part = df_part[["ticker", "timeframe", "datetime", "open", "high", "low", "close", "volume"]]
+        all_data.append(df_part)
+
+        total_bars += len(df_part)
+        print(f"✅ [{iteration}] Получено {len(df_part)} баров ({df_part['datetime'].min()} → {df_part['datetime'].max()})")
+
+        # --- Если это первичная загрузка (-1000), достаточно 1 итерации ---
+        if since is None:
+            print(f"🧩 Первичная загрузка завершена ({len(df_part)} баров).")
+            break
+
+        # --- Если меньше 1000, значит достигнут конец истории ---
+        if len(df_part) < 1000:
+            print(f"ℹ️ Последняя порция <1000 баров, загрузка завершена.")
+            break
+
+        # --- Следующее окно ---
+        next_from = df_part["datetime"].max() + timedelta(milliseconds=1)
+        time.sleep(0.5)
+
+    if not all_data:
+        print(f"⚠️ Нет данных для {symbol}")
         return pd.DataFrame()
 
-    req_id = str(uuid4())
-    params = {
-        "Symbol": symbol,
-        "Periodicity": timeframe,
-        "PriceType": "bid",
-        "Timestamp": int(time.time() * 1000),
-        "Count": count
-    }
-    if since:
-        params["From"] = int(since.timestamp() * 1000)
-
-    ws.send(json.dumps({"Id": req_id, "Request": "QuoteHistoryBars", "Params": params}))
-    data = json.loads(ws.recv())
-    ws.close()
-
-    if "Result" not in data or "Bars" not in data["Result"]:
-        print(f"⚠️ Нет данных для {symbol}: {data}")
-        return pd.DataFrame()
-
-    bars = data["Result"]["Bars"]
-    df = pd.DataFrame(bars)
-    df["datetime"] = pd.to_datetime(df["Timestamp"], unit="ms")
-    df["ticker"] = symbol
-    df["timeframe"] = timeframe
-    df.rename(columns={
-        "Open": "open", "High": "high", "Low": "low",
-        "Close": "close", "Volume": "volume"
-    }, inplace=True)
-    df = df[["ticker", "timeframe", "datetime", "open", "high", "low", "close", "volume"]]
-    print(f"✅ Получено {len(df)} баров для {symbol}")
+    df = pd.concat(all_data).drop_duplicates(subset="datetime").sort_values("datetime")
+    print(f"🎯 Загружено всего {total_bars} баров ({iteration} запросов) для {symbol} ({timeframe})")
     return df
 
 # =======================================================
-# 💾 Сохранение котировок в instrument_quotes
+# 💾 Сохранение котировок в instrument_quotes (без дублей)
 # =======================================================
 def save_to_db(df: pd.DataFrame):
     if df.empty:
         print("⚠️ Пустой DataFrame, пропускаем.")
         return
+
+    ticker = df["ticker"].iloc[0]
+    timeframe = df["timeframe"].iloc[0]
+
     with engine.begin() as conn:
-        df.to_sql("instrument_quotes", conn, if_exists="append", index=False)
-    print(f"📊 Сохранено {len(df)} строк для {df['ticker'].iloc[0]} ({df['timeframe'].iloc[0]})")
+        existing_dates = pd.read_sql(
+            text("""
+                SELECT datetime FROM instrument_quotes
+                WHERE ticker = :ticker AND timeframe = :tf
+            """),
+            conn,
+            params={"ticker": ticker, "tf": timeframe}
+        )['datetime'].astype('datetime64[ns]')
+
+        df_filtered = df[~df["datetime"].isin(existing_dates)]
+
+        if not df_filtered.empty:
+            df_filtered.to_sql("instrument_quotes", conn, if_exists="append", index=False)
+            print(f"📊 Добавлено {len(df_filtered)} новых баров для {ticker} ({timeframe})")
+        else:
+            print(f"✅ Нет новых баров для {ticker} ({timeframe}) — пропускаем.")
 
 # =======================================================
 # 🔁 Проверка и обновление котировок
@@ -144,7 +216,6 @@ def update_quotes_if_needed(ticker, timeframe):
     last_dt = get_last_datetime(ticker, timeframe)
     now = datetime.utcnow()
 
-    # Интервалы обновления по таймфрейму
     refresh_period = {
         "M1": timedelta(minutes=1),
         "M5": timedelta(minutes=5),
@@ -154,10 +225,14 @@ def update_quotes_if_needed(ticker, timeframe):
         "D1": timedelta(days=1)
     }.get(timeframe, timedelta(hours=1))
 
-    # Проверяем, пора ли обновлять
-    if last_dt is None or now - last_dt >= refresh_period:
+    if last_dt is None:
+        print(f"🆕 История отсутствует в БД → первичная загрузка {ticker} ({timeframe})")
+        df = fetch_quote_history(ticker, timeframe=timeframe, since=None)
+        if not df.empty:
+            save_to_db(df)
+    elif now - last_dt >= refresh_period:
         print(f"🕒 Обновляем данные для {ticker} с {last_dt}")
-        df = fetch_quote_history(ticker, timeframe=timeframe, count=-500, since=last_dt)
+        df = fetch_quote_history(ticker, timeframe=timeframe, since=last_dt)
         if not df.empty:
             save_to_db(df)
     else:
@@ -175,7 +250,7 @@ def run_auto_update(timeframe="M30"):
                 update_quotes_if_needed(ticker, timeframe)
             except Exception as e:
                 print(f"❌ Ошибка обновления для {ticker}: {e}")
-        time.sleep(60)  # проверяем каждые 60 секунд
+        time.sleep(60)
 
 # =======================================================
 # 🧪 Тестовый запуск
