@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QStackedLayout
 from ui.dashboard.dashboard import DashboardPage
 from ui.dashboard.portfolios_page import PortfoliosPage
 from ui.dashboard.instruments_page import InstrumentsPage
-from ui.dashboard.charts_page import ChartsPage
+from ui.dashboard.charts.charts_page import ChartsPage
 from ui.dashboard.analysis_page import AnalysisPage
 from ui.dashboard.fundamentals_page import FundamentalsPage
 from ui.dashboard.options_page import OptionsPage
