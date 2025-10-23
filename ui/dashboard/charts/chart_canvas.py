@@ -5,7 +5,7 @@ from services.chart_service import fetch_candles
 import numpy as np
 
 
-class CandleChart(QWidget):
+class ChartCanvas(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumHeight(480)

@@ -1,60 +1,134 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout
-from ui.dashboard.charts.chart_toolbar import ChartToolbar
-from ui.dashboard.charts.chart_canvas import CandleChart
-from ui.dashboard.charts.drawing_tools_panel import DrawingToolsPanel
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QLabel, QPushButton, QFrame
+from PyQt6.QtCore import Qt
+from .chart_canvas import ChartCanvas  # убедись, что в файле класс называется ChartCanvas
+from .custom_dropdown import CustomDropdown
+from .drawing_tools_panel import DrawingToolsPanel
 
 
 class ChartsPage(QWidget):
     def __init__(self):
         super().__init__()
 
-        # === ГЛАВНЫЙ вертикальный layout ===
+        # === главный вертикальный контейнер: toolbar сверху, ниже tools+chart ===
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(10, 8, 10, 10)
+        main_layout.setSpacing(8)
 
-        # === ВЕРХНЯЯ панель (toolbar) ===
-        self.toolbar = ChartToolbar(
-            on_symbol_change=self.on_symbol_change,
-            on_timeframe_change=self.on_timeframe_change,
-            on_type_change=self.on_chart_type_change,
-            on_indicator_change=self.on_indicator_change
-        )
-        main_layout.addWidget(self.toolbar)
+        # ===================== toolbar =====================
+        toolbar = QFrame()
+        toolbar.setObjectName("toolbar")
+        toolbar.setStyleSheet("""
+            QFrame#toolbar {
+                background-color: #222222;
+                border: none;
+            }
+            QLabel { color: #A2DD84; }
+        """)
+        toolbar.setFixedHeight(48)
 
-        # === НИЖНЯЯ часть (левая панель + график) ===
-        bottom_layout = QHBoxLayout()
-        bottom_layout.setContentsMargins(10, 10, 10, 10)
-        bottom_layout.setSpacing(6)
+        tl = QHBoxLayout(toolbar)
+        tl.setContentsMargins(12, 6, 12, 6)
+        tl.setSpacing(10)
 
-        # --- Левая панель инструментов ---
-        self.drawing_panel = DrawingToolsPanel()
-        bottom_layout.addWidget(self.drawing_panel)
+        # Symbol
+        self.symbol_input = QLineEdit()
+        self.symbol_input.setPlaceholderText("Enter ticker (e.g. AAPL)")
+        self.symbol_input.setFixedWidth(220)  # не растягиваем
+        self.symbol_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #2A2A2A;
+                color: white;
+                border: 1px solid #444;
+                border-radius: 6px;
+                padding: 4px 10px;
+                selection-background-color: #A2DD84;
+            }
+            QLineEdit:focus { border: 1px solid #A2DD84; }
+        """)
+        self.symbol_input.returnPressed.connect(self._on_symbol_enter)
 
-        # --- Центральная часть (график) ---
-        self.chart_canvas = CandleChart()
-        bottom_layout.addWidget(self.chart_canvas)
+        tl.addWidget(self.symbol_input)
 
-        main_layout.addLayout(bottom_layout)
-        self.setLayout(main_layout)
+        # Timeframes (кнопки)
 
-        # === Дефолтный запуск ===
-        self.chart_canvas.symbol = "AAPL"
-        self.chart_canvas.timeframe = "M30"
-        self.chart_canvas.update_data()
+        self.timeframe_buttons = {}
+        for tf in ["M1", "M5", "M15", "M30", "H1", "D1"]:
+            btn = QPushButton(tf)
+            btn.setCheckable(True)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color:#333;
+                    color:white;
+                    border-radius:5px;
+                    padding:4px 10px;
+                }
+                QPushButton:checked {
+                    background-color:#A2DD84;
+                    color:black;
+                }
+            """)
+            btn.clicked.connect(lambda _, t=tf: self._on_timeframe_click(t))
+            self.timeframe_buttons[tf] = btn
+            tl.addWidget(btn)
+        self.timeframe_buttons["M30"].setChecked(True)
 
-    # ---------- Обработчики ----------
-    def on_symbol_change(self, symbol):
-        self.chart_canvas.symbol = symbol
-        self.chart_canvas.update_data()
+        # кастомные dropdowns
+        self.dd_chart_type = CustomDropdown("Chart Type", ["Candlestick", "Line"], "Candlestick", parent=toolbar)
+        self.dd_chart_type.changed.connect(self._on_chart_type_change)
+        tl.addWidget(self.dd_chart_type)
 
-    def on_timeframe_change(self, timeframe):
-        self.chart_canvas.timeframe = timeframe
-        self.chart_canvas.update_data()
+        self.dd_indicators = CustomDropdown("Indicators", ["None", "EMA 25", "EMA 100", "EMA 200"], "None", parent=toolbar)
+        self.dd_indicators.changed.connect(self._on_indicator_change)
+        tl.addWidget(self.dd_indicators)
 
-    def on_chart_type_change(self, chart_type):
-        self.chart_canvas.chart_type = chart_type
-        self.chart_canvas.update()
+        tl.addStretch()
+        main_layout.addWidget(toolbar)
 
-    def on_indicator_change(self, indicator_name):
-        self.chart_canvas.apply_indicator(indicator_name)
+        # тонкая разделительная линия (визуально отделить toolbar от графика)
+        sep = QFrame()
+        sep.setFixedHeight(1)
+        sep.setStyleSheet("background-color: #2b2b2b;")
+        main_layout.addWidget(sep)
+
+        # ===================== нижний блок: tools + chart =====================
+        bottom = QHBoxLayout()
+        bottom.setContentsMargins(0, 0, 0, 0)
+        bottom.setSpacing(6)
+
+        # левая панель — СТРОГО под toolbar, т.к. toolbar сверху в отдельном слое
+        self.tools_panel = DrawingToolsPanel()
+        self.tools_panel.setFixedWidth(120)
+        bottom.addWidget(self.tools_panel)
+
+        # график
+        self.chart = ChartCanvas()
+        bottom.addWidget(self.chart, stretch=1)
+
+        main_layout.addLayout(bottom)
+
+        # дефолт
+        self.chart.symbol = "AAPL"
+        self.chart.timeframe = "M30"
+        self.chart.update_data()
+
+    # ===================== handlers =====================
+    def _on_symbol_enter(self):
+        sym = self.symbol_input.text().strip().upper()
+        if not sym:
+            return
+        self.chart.symbol = sym
+        self.chart.update_data()
+
+    def _on_timeframe_click(self, tf: str):
+        for t, b in self.timeframe_buttons.items():
+            b.setChecked(t == tf)
+        self.chart.timeframe = tf
+        self.chart.update_data()
+
+    def _on_chart_type_change(self, val: str):
+        self.chart.chart_type = val
+        self.chart.update()
+
+    def _on_indicator_change(self, val: str):
+        # ожидаем значения "None" / "EMA 25" / "EMA 100" / "EMA 200"
+        self.chart.apply_indicator(val)
