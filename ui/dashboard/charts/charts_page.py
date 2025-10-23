@@ -97,7 +97,7 @@ class ChartsPage(QWidget):
 
         # левая панель — СТРОГО под toolbar, т.к. toolbar сверху в отдельном слое
         self.tools_panel = DrawingToolsPanel()
-        self.tools_panel.setFixedWidth(120)
+        self.tools_panel.setFixedWidth(60)
         bottom.addWidget(self.tools_panel)
 
         # график
