@@ -1,25 +1,26 @@
-# ui/dashboard/charts/chart_canvas.py
-from PyQt6.QtWidgets import QWidget, QVBoxLayout
+from PyQt6.QtWidgets import QWidget
 from PyQt6.QtCore import Qt, QTimer, QPointF
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QPainterPath
-from datetime import datetime, timedelta
 from services.chart_service import fetch_candles
+import numpy as np
 
 
 class CandleChart(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumHeight(500)
+        self.setMinimumHeight(480)
         self.setMouseTracking(True)
         self.setStyleSheet("background-color: #222222; border-radius: 6px;")
 
-        # --- параметры графика ---
+        # --- параметры ---
         self.data = []
         self.symbol = "AAPL"
         self.timeframe = "M30"
+        self.chart_type = "Candlestick"
         self.visible_candles = 150
         self.scroll_offset = 0
         self.cursor_pos = None
+        self.active_indicators = []
 
         # --- перетаскивание ---
         self.dragging = False
@@ -30,37 +31,13 @@ class CandleChart(QWidget):
         self.margin_right = 60
         self.margin_top = 25
         self.margin_bottom = 25
-
         self.font = QFont("Helvetica Neue", 9)
 
-        # --- автообновление каждые 15 минут ---
+        # --- автообновление каждые 15 мин ---
         self.timer = QTimer(self)
-        self.timer.timeout.connect(self._schedule_next_update)
-        self._schedule_next_update()
+        self.timer.timeout.connect(self.update_data)
+        self.timer.start(15 * 60 * 1000)
         self.update_data()
-
-    # ---------- планировщик автообновлений ----------
-    def _schedule_next_update(self):
-        """Планирует следующее обновление на ближайшие 15 минут"""
-        now = datetime.utcnow()
-        minute = now.minute
-        next_quarter = ((minute // 15) + 1) * 15
-        if next_quarter == 60:
-            next_quarter = 0
-            next_time = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
-        else:
-            next_time = now.replace(minute=next_quarter, second=0, microsecond=0)
-
-        delta_ms = int((next_time - now).total_seconds() * 1000)
-        print(f"[Chart] Следующее автообновление в {next_time.strftime('%H:%M:%S')} UTC")
-
-        QTimer.singleShot(delta_ms, self._on_auto_update)
-
-    def _on_auto_update(self):
-        """Выполняет автообновление и планирует следующее"""
-        print(f"[Chart] 🔄 Автообновление графика {self.symbol} ({self.timeframe})")
-        self.update_data()
-        self._schedule_next_update()
 
     # ---------- загрузка данных ----------
     def update_data(self):
@@ -93,9 +70,7 @@ class CandleChart(QWidget):
         if self.dragging and self.last_mouse_x is not None:
             dx = int(event.position().x() - self.last_mouse_x)
             self.last_mouse_x = event.position().x()
-
-            scroll_speed = 0.5
-            self.scroll_offset += int(dx * scroll_speed)
+            self.scroll_offset += int(dx * 0.5)
             max_offset = max(0, len(self.data) - self.visible_candles)
             self.scroll_offset = max(0, min(max_offset, self.scroll_offset))
             self.update()
@@ -132,13 +107,15 @@ class CandleChart(QWidget):
         end_idx = min(total, total - self.scroll_offset)
         subset = self.data[start_idx:end_idx]
 
+        if len(subset) > self.visible_candles:
+            subset = subset[-self.visible_candles:]
+
         if not subset:
             return
 
         closes = [c[4] for c in subset]
         highs = [c[2] for c in subset]
         lows = [c[3] for c in subset]
-
         min_price = min(lows)
         max_price = max(highs)
         price_range = max_price - min_price if max_price > min_price else 1
@@ -162,27 +139,36 @@ class CandleChart(QWidget):
             x = int(left + i * candle_width)
             painter.drawText(x - 15, int(top + height + 15), label)
 
-        # --- свечи ---
-        for i, (dt, o, h, l, c) in enumerate(subset):
-            x = left + i * candle_width
-            y_open = top + height - ((o - min_price) / price_range) * height
-            y_close = top + height - ((c - min_price) / price_range) * height
-            y_high = top + height - ((h - min_price) / price_range) * height
-            y_low = top + height - ((l - min_price) / price_range) * height
+        # --- свечи / линия ---
+        if self.chart_type == "Candlestick":
+            for i, (dt, o, h, l, c) in enumerate(subset):
+                x = left + i * candle_width
+                y_open = top + height - ((o - min_price) / price_range) * height
+                y_close = top + height - ((c - min_price) / price_range) * height
+                y_high = top + height - ((h - min_price) / price_range) * height
+                y_low = top + height - ((l - min_price) / price_range) * height
 
-            color = QColor("#A2DD84") if c >= o else QColor("#FF4D4D")
-            pen = QPen(color, 1)
-            painter.setPen(pen)
-            painter.drawLine(int(x + candle_width / 2), int(y_high), int(x + candle_width / 2), int(y_low))
-            painter.fillRect(int(x), int(min(y_open, y_close)),
-                             int(candle_width - 1), int(abs(y_close - y_open)),
-                             color)
+                color = QColor("#A2DD84") if c >= o else QColor("#FF4D4D")
+                pen = QPen(color, 1)
+                painter.setPen(pen)
+                painter.drawLine(int(x + candle_width / 2), int(y_high), int(x + candle_width / 2), int(y_low))
+                painter.fillRect(int(x), int(min(y_open, y_close)), int(candle_width - 1),
+                                 int(abs(y_close - y_open)), color)
+        else:
+            path = QPainterPath()
+            path.moveTo(left, top + height - ((closes[0] - min_price) / price_range) * height)
+            for i, c in enumerate(closes):
+                x = left + i * candle_width
+                y = top + height - ((c - min_price) / price_range) * height
+                path.lineTo(x, y)
+            painter.setPen(QPen(QColor("#A2DD84"), 1.5))
+            painter.drawPath(path)
 
-        # --- EMA линии ---
-        self.draw_ema(painter, self.data, 25, QColor("#00BFFF"), subset, rect, min_price, price_range, candle_width, start_idx)
-        self.draw_ema(painter, self.data, 100, QColor("#FFB347"), subset, rect, min_price, price_range, candle_width, start_idx)
+        # --- индикаторы (EMA/SMA) ---
+        for ind in self.active_indicators:
+            self.draw_indicator(painter, ind, subset, rect, min_price, price_range, candle_width, start_idx)
 
-        # --- ось Y ---
+        # --- ось Y справа ---
         painter.setPen(QColor("#A2DD84"))
         for i in range(5):
             price = max_price - i * (price_range / 4)
@@ -205,7 +191,68 @@ class CandleChart(QWidget):
             if left < cx < left + width and top < cy < top + height:
                 self.draw_crosshair(painter, cx, cy, subset, left, top, width, height, min_price, price_range, candle_width)
 
-    # ---------- кроссхейр ----------
+    # ---------- Индикаторы ----------
+    def apply_indicator(self, indicator_name):
+        if indicator_name == "None":
+            self.active_indicators.clear()
+            self.update()
+            return
+        self.active_indicators = [indicator_name]
+        self.update()
+
+    def draw_indicator(self, painter, indicator_name, subset, rect, min_price, price_range, candle_width, start_idx):
+        if indicator_name.startswith("EMA"):
+            period = int(indicator_name.split(" ")[1])
+            self.draw_ema(painter, self.data, period, QColor("#00BFFF"), subset, rect, min_price, price_range, candle_width, start_idx)
+        elif indicator_name.startswith("SMA"):
+            period = int(indicator_name.split(" ")[1])
+            self.draw_sma(painter, self.data, period, QColor("#FFB347"), subset, rect, min_price, price_range, candle_width, start_idx)
+
+    def draw_ema(self, painter, all_data, period, color, subset, rect, min_price, price_range, candle_width, start_idx):
+        if len(all_data) < period:
+            return
+        closes = [c[4] for c in all_data]
+        ema_values = []
+        k = 2 / (period + 1)
+        ema = closes[0]
+        ema_values.append(ema)
+        for price in closes[1:]:
+            ema = price * k + ema * (1 - k)
+            ema_values.append(ema)
+
+        ema_visible = ema_values[start_idx:start_idx + len(subset)]
+        left, top = self.margin_left, self.margin_top
+        height = rect.height() - self.margin_top - self.margin_bottom
+        path = QPainterPath()
+        for i, ema_val in enumerate(ema_visible):
+            x = left + i * candle_width
+            y = top + height - ((ema_val - min_price) / price_range) * height
+            if i == 0:
+                path.moveTo(QPointF(x, y))
+            else:
+                path.lineTo(QPointF(x, y))
+        painter.setPen(QPen(color, 1.5))
+        painter.drawPath(path)
+
+    def draw_sma(self, painter, all_data, period, color, subset, rect, min_price, price_range, candle_width, start_idx):
+        if len(all_data) < period:
+            return
+        closes = np.array([c[4] for c in all_data])
+        sma = np.convolve(closes, np.ones(period) / period, mode="valid")
+        left, top = self.margin_left, self.margin_top
+        height = rect.height() - self.margin_top - self.margin_bottom
+        path = QPainterPath()
+        for i, val in enumerate(sma[start_idx:start_idx + len(subset)]):
+            x = left + (i + period - 1) * candle_width
+            y = top + height - ((val - min_price) / price_range) * height
+            if i == 0:
+                path.moveTo(x, y)
+            else:
+                path.lineTo(x, y)
+        painter.setPen(QPen(color, 1.5))
+        painter.drawPath(path)
+
+    # ---------- crosshair ----------
     def draw_crosshair(self, painter, cx, cy, data, left, top, width, height, min_price, price_range, candle_width):
         painter.setPen(QPen(QColor("#A2DD84"), 1, Qt.PenStyle.DashLine))
         painter.drawLine(cx, top, cx, top + height)
@@ -221,45 +268,3 @@ class CandleChart(QWidget):
             painter.drawText(cx - 40, top + height + 18, dt)
             painter.drawRoundedRect(left + width + 2, cy - 8, 50, 16, 3, 3)
             painter.drawText(left + width + 8, cy + 5, f"{price:.2f}")
-
-    # ---------- EMA ----------
-    def draw_ema(self, painter, all_data, period, color, subset, rect, min_price, price_range, candle_width, start_idx):
-        if len(all_data) < period:
-            return
-
-        closes = [c[4] for c in all_data]
-        ema_values = []
-        k = 2 / (period + 1)
-
-        ema = closes[0]
-        ema_values.append(ema)
-        for price in closes[1:]:
-            ema = price * k + ema * (1 - k)
-            ema_values.append(ema)
-
-        ema_visible = ema_values[start_idx:start_idx + len(subset)]
-
-        left, top = self.margin_left, self.margin_top
-        height = rect.height() - self.margin_top - self.margin_bottom
-
-        path = QPainterPath()
-        for i, ema_val in enumerate(ema_visible):
-            x = left + i * candle_width
-            y = top + height - ((ema_val - min_price) / price_range) * height
-            if i == 0:
-                path.moveTo(QPointF(x, y))
-            else:
-                path.lineTo(QPointF(x, y))
-
-        painter.setPen(QPen(color, 1.5))
-        painter.drawPath(path)
-
-
-class ChartCanvas(QWidget):
-    def __init__(self):
-        super().__init__()
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-
-        self.chart = CandleChart()
-        layout.addWidget(self.chart)
