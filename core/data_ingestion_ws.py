@@ -11,9 +11,8 @@ from dotenv import load_dotenv
 from websocket import create_connection
 from sqlalchemy import create_engine, text
 
-# =======================================================
-# ⚙️ Конфигурация
-# =======================================================
+# Конфигурация
+
 load_dotenv()
 
 FXOPEN_API_ID = os.getenv("FXOPEN_API_ID")
@@ -31,26 +30,23 @@ engine = create_engine(DB_URL)
 
 WS_URL = "wss://marginalttlivewebapi.fxopen.net/feed"
 
-# =======================================================
-# 🔐 Подпись HMAC
-# =======================================================
+# Подпись HMAC
+
 def create_signature(timestamp, api_id, api_key, secret):
     msg = f"{timestamp}{api_id}{api_key}"
     digest = hmac.new(secret.encode(), msg.encode(), hashlib.sha256).digest()
     return base64.b64encode(digest).decode()
 
-# =======================================================
-# 🧩 Получение тикеров из instruments
-# =======================================================
+# Получение тикеров из instruments
+
 def get_tickers_from_db():
     with engine.connect() as conn:
         result = conn.execute(text("SELECT ticker FROM instruments"))
         tickers = [row[0] for row in result]
     return tickers
 
-# =======================================================
-# 📈 Проверка последней даты по тикеру
-# =======================================================
+# Проверка последней даты по тикеру
+
 def get_last_datetime(ticker, timeframe):
     query = text("""
         SELECT MAX(datetime)
@@ -61,9 +57,9 @@ def get_last_datetime(ticker, timeframe):
         result = conn.execute(query, {"ticker": ticker, "tf": timeframe}).scalar()
     return result
 
-# =======================================================
-# 📡 Получение истории котировок
-# =======================================================
+
+# Получение истории котировок
+
 def fetch_quote_history(symbol: str, timeframe: str = "D1", since: datetime | None = None):
     """
     Загружает бары из FXOpen.
@@ -84,7 +80,7 @@ def fetch_quote_history(symbol: str, timeframe: str = "D1", since: datetime | No
         timestamp = int(time.time() * 1000)
         signature = create_signature(timestamp, FXOPEN_API_ID, FXOPEN_API_KEY, FXOPEN_API_SECRET)
 
-        # --- Авторизация ---
+        # Авторизация
         login_msg = {
             "Id": str(uuid4()),
             "Request": "Login",
@@ -105,7 +101,7 @@ def fetch_quote_history(symbol: str, timeframe: str = "D1", since: datetime | No
             ws.close()
             break
 
-        # --- Формирование запроса ---
+        # Формирование запроса
         req_id = str(uuid4())
         params = {
             "Symbol": symbol,
@@ -179,9 +175,8 @@ def fetch_quote_history(symbol: str, timeframe: str = "D1", since: datetime | No
     print(f"🎯 Загружено всего {total_bars} баров ({iteration} запросов) для {symbol} ({timeframe})")
     return df
 
-# =======================================================
-# 💾 Сохранение котировок в instrument_quotes (без дублей)
-# =======================================================
+# Сохранение котировок в instrument_quotes (без дублей)
+
 def save_to_db(df: pd.DataFrame):
     if df.empty:
         print("⚠️ Пустой DataFrame, пропускаем.")
@@ -208,9 +203,8 @@ def save_to_db(df: pd.DataFrame):
         else:
             print(f"✅ Нет новых баров для {ticker} ({timeframe}) — пропускаем.")
 
-# =======================================================
-# 🔁 Проверка и обновление котировок
-# =======================================================
+# Проверка и обновление котировок
+
 def update_quotes_if_needed(ticker, timeframe):
     print(f"🔍 Проверка обновления для {ticker} ({timeframe})")
     last_dt = get_last_datetime(ticker, timeframe)
@@ -238,9 +232,9 @@ def update_quotes_if_needed(ticker, timeframe):
     else:
         print(f"✅ Актуальные данные для {ticker}, обновление не требуется.")
 
-# =======================================================
-# 🚀 Основной цикл автообновления
-# =======================================================
+
+# Основной цикл автообновления
+
 def run_auto_update(timeframe="M30"):
     print("🚀 Запуск автообновления котировок...")
     while True:
@@ -252,8 +246,7 @@ def run_auto_update(timeframe="M30"):
                 print(f"❌ Ошибка обновления для {ticker}: {e}")
         time.sleep(60)
 
-# =======================================================
-# 🧪 Тестовый запуск
-# =======================================================
+# Тестовый запуск
+
 if __name__ == "__main__":
     run_auto_update(timeframe="M30")

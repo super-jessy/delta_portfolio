@@ -1,5 +1,3 @@
-# services/stock_info.py
-
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -32,9 +30,9 @@ RETRY_BACKOFF = 1.6
 POLY_TICKER_URL = "https://api.polygon.io/v3/reference/tickers/{ticker}?apiKey={api_key}"
 
 
-# ────────────────────────────────────────────────
+
 # Вспомогательные функции
-# ────────────────────────────────────────────────
+
 def ensure_logs_dir():
     """Создаёт папку logs/, если её нет."""
     if not os.path.exists(LOGS_DIR):
@@ -74,9 +72,9 @@ def _parse_date(s: Optional[str]) -> Optional[str]:
             return None
 
 
-# ────────────────────────────────────────────────
+
 # Сетевые функции
-# ────────────────────────────────────────────────
+
 async def fetch_json(session: aiohttp.ClientSession, url: str) -> Optional[Dict]:
     for attempt in range(1, MAX_RETRIES + 1):
         try:
@@ -111,9 +109,9 @@ async def fetch_bytes(session: aiohttp.ClientSession, url: str) -> Optional[byte
     return None
 
 
-# ────────────────────────────────────────────────
+
 # Маппинг Polygon → БД
-# ────────────────────────────────────────────────
+
 def map_polygon_to_db(record: Dict, logo_bytes: Optional[bytes]) -> Dict[str, Any]:
     r = record.get("results", {}) if record else {}
     address = _safe_get(r, ["address"], {}) or {}
@@ -145,9 +143,9 @@ def map_polygon_to_db(record: Dict, logo_bytes: Optional[bytes]) -> Dict[str, An
     }
 
 
-# ────────────────────────────────────────────────
+
 # Обработка одного тикера
-# ────────────────────────────────────────────────
+
 async def process_ticker(semaphore: asyncio.Semaphore,
                          session: aiohttp.ClientSession,
                          ticker: str) -> Optional[Dict[str, Any]]:
@@ -174,9 +172,9 @@ async def process_ticker(semaphore: asyncio.Semaphore,
         return map_polygon_to_db(meta, logo_bytes)
 
 
-# ────────────────────────────────────────────────
+
 # Основная загрузка
-# ────────────────────────────────────────────────
+
 async def run_loader(tickers: List[str]):
     if not POLYGON_API_KEY:
         raise RuntimeError("POLYGON_API_KEY не найден в .env")
@@ -229,9 +227,9 @@ async def run_loader(tickers: List[str]):
         db.close()
 
 
-# ────────────────────────────────────────────────
+
 # CSV загрузка
-# ────────────────────────────────────────────────
+
 def load_tickers_from_csv(path: str) -> List[str]:
     if not os.path.exists(path):
         raise FileNotFoundError(f"CSV not found: {path}")
@@ -239,9 +237,9 @@ def load_tickers_from_csv(path: str) -> List[str]:
     return df["symbols"].dropna().astype(str).tolist()
 
 
-# ────────────────────────────────────────────────
+
 # Точка входа
-# ────────────────────────────────────────────────
+
 if __name__ == "__main__":
     try:
         tickers = load_tickers_from_csv(CSV_PATH)

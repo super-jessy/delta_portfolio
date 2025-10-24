@@ -167,7 +167,6 @@ class InstrumentsPage(QWidget):
         self.info_layout.addWidget(self.header_frame)
         self.add_divider(self.info_layout)
 
-        # ───────────── SECTIONS ─────────────
         self.sections = {}
 
         def create_section(title):
@@ -202,7 +201,6 @@ class InstrumentsPage(QWidget):
         self.sections["Company Specifications"] = create_section("Company Specifications")
         self.sections["Company Contacts"] = create_section("Company Contacts")
 
-        # ───────────── DESCRIPTION ─────────────
         desc_label = QLabel("Description")
         desc_label.setStyleSheet("color: #A2DD84; font-weight: 600; font-size: 14px; margin-top: 8px; background: transparent; border: none;")
         self.info_layout.addWidget(desc_label)
@@ -231,7 +229,6 @@ class InstrumentsPage(QWidget):
              self.load_instrument_details(row_idx, 0)       
              break
 
-    # ──────────────────────────────
     def add_divider(self, layout):
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
@@ -246,9 +243,6 @@ class InstrumentsPage(QWidget):
         """)
         layout.addWidget(line)
 
-    # ──────────────────────────────
-    # Загрузка тикеров
-    # ──────────────────────────────
     def load_tickers(self):
         try:
             conn = psycopg2.connect(
@@ -284,9 +278,7 @@ class InstrumentsPage(QWidget):
         filtered = [(t, n) for (t, n) in self.all_tickers if text in t.lower() or text in (n or "").lower()]
         self.display_tickers(filtered)
 
-    # ──────────────────────────────
-    # Загрузка деталей инструмента
-    # ──────────────────────────────
+
     def load_instrument_details(self, row, column):
         ticker_item = self.table_widget.item(row, 0)
         if not ticker_item:

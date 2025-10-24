@@ -6,7 +6,7 @@ class DrawingToolsPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        # 🔹 Узкая, тёмная панель
+        # Узкая, тёмная панель
         self.setFixedWidth(60)
         self.setStyleSheet("background-color: #1E1E1E; border: none;")
 
@@ -14,7 +14,7 @@ class DrawingToolsPanel(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(8)
 
-        # 🔹 Все инструменты (PNG)
+        # Все инструменты (PNG)
         tools = [
             ("Trendline", "assets/icons/chart_page/trendline.png"),
             ("Horisontal Line", "assets/icons/chart_page/horisontal_line.png"),
@@ -42,7 +42,7 @@ class DrawingToolsPanel(QWidget):
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
 
-            # 🔹 Стилизация: hover + active (selected)
+            # Стилизация: hover + active (selected)
             btn.setStyleSheet("""
                 QPushButton {
                     background-color: transparent;

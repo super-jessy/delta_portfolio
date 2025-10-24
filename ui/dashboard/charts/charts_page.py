@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QLabel, QPushButton, QFrame
 from PyQt6.QtCore import Qt
-from .chart_canvas import ChartCanvas  # убедись, что в файле класс называется ChartCanvas
+from .chart_canvas import ChartCanvas  
 from .custom_dropdown import CustomDropdown
 from .drawing_tools_panel import DrawingToolsPanel
 
@@ -9,12 +9,12 @@ class ChartsPage(QWidget):
     def __init__(self):
         super().__init__()
 
-        # === главный вертикальный контейнер: toolbar сверху, ниже tools+chart ===
+    
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(10, 8, 10, 10)
         main_layout.setSpacing(8)
 
-        # ===================== toolbar =====================
+      
         toolbar = QFrame()
         toolbar.setObjectName("toolbar")
         toolbar.setStyleSheet("""
@@ -84,18 +84,18 @@ class ChartsPage(QWidget):
         tl.addStretch()
         main_layout.addWidget(toolbar)
 
-        # тонкая разделительная линия (визуально отделить toolbar от графика)
+       
         sep = QFrame()
         sep.setFixedHeight(1)
         sep.setStyleSheet("background-color: #2b2b2b;")
         main_layout.addWidget(sep)
 
-        # ===================== нижний блок: tools + chart =====================
+      
         bottom = QHBoxLayout()
         bottom.setContentsMargins(0, 0, 0, 0)
         bottom.setSpacing(6)
 
-        # левая панель — СТРОГО под toolbar, т.к. toolbar сверху в отдельном слое
+    
         self.tools_panel = DrawingToolsPanel()
         self.tools_panel.setFixedWidth(60)
         bottom.addWidget(self.tools_panel)
@@ -111,7 +111,7 @@ class ChartsPage(QWidget):
         self.chart.timeframe = "M30"
         self.chart.update_data()
 
-    # ===================== handlers =====================
+
     def _on_symbol_enter(self):
         sym = self.symbol_input.text().strip().upper()
         if not sym:

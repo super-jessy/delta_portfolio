@@ -48,6 +48,6 @@ class FrameWrap(QFrame):
         self.stretch = stretch
         lay = QVBoxLayout(self)
         lay.setContentsMargins(*margins)
-        lay.setAlignment(Qt.AlignmentFlag.AlignTop)  # 👈 ключевая строка!
+        lay.setAlignment(Qt.AlignmentFlag.AlignTop)  # ключевая строка!
         lay.addWidget(content)
 

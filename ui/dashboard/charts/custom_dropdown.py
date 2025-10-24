@@ -8,7 +8,6 @@ class DropdownPopup(QWidget):
 
     def __init__(self, options: list[str], parent=None):
         super().__init__(parent)
-        # делаем настоящий popup-виджет поверх всех, который сам закрывается при клике вне
         self.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
 
@@ -85,7 +84,7 @@ class CustomDropdown(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.button)
 
-        self.popup = None  # создаём на лету, чтобы позиционировать корректно
+        self.popup = None 
 
     def _toggle_popup(self):
         if self.popup and self.popup.isVisible():

@@ -111,5 +111,5 @@ class EconomicCalendarPanel(QWidget):
         return dt, ""
 
 
-# ✅ Чтобы импорт в dashboard.py не ломался:
+# Чтобы импорт в dashboard.py не ломался:
 EconCalendar = EconomicCalendarPanel

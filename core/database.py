@@ -3,9 +3,9 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, MetaData
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-# ==========================
-# 🧩 Загрузка переменных окружения
-# ==========================
+
+# Загрузка переменных окружения
+
 load_dotenv()
 
 PG_HOST = os.getenv("PG_HOST")
@@ -15,14 +15,14 @@ PG_USER = os.getenv("PG_USER")
 PG_PASSWORD = os.getenv("PG_PASSWORD")
 PG_SCHEMA = os.getenv("PG_SCHEMA", "public")
 
-# ==========================
-# 🧠 Формирование URL подключения
-# ==========================
+
+# Формирование URL подключения
+
 DATABASE_URL = f"postgresql://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG_DB}"
 
-# ==========================
-# ⚙️ Инициализация SQLAlchemy
-# ==========================
+
+# Инициализация SQLAlchemy
+
 engine = create_engine(DATABASE_URL, echo=False)
 
 # Устанавливаем схему по умолчанию
@@ -31,9 +31,9 @@ Base = declarative_base(metadata=metadata)
 
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
-# ==========================
-# 🧱 Пример ORM моделей
-# ==========================
+
+# Пример ORM моделей
+
 from sqlalchemy import Column, Integer, String, Float, DateTime, JSON
 
 class MarketOHLC(Base):
@@ -79,9 +79,8 @@ class ExperimentRegistry(Base):
     metrics = Column(JSON)
     tag = Column(String, index=True)
 
-# ==========================
-# 🔄 Функции и инициализация
-# ==========================
+# Функции и инициализация
+
 def init_db():
     """Создаёт все таблицы в PostgreSQL, если их нет."""
     print("⏳ Initializing PostgreSQL database...")

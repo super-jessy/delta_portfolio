@@ -16,7 +16,7 @@ class ChartToolbar(QWidget):
         layout.setContentsMargins(10, 8, 10, 8)
         layout.setSpacing(12)
 
-        # === Поле ввода тикера ===
+
         symbol_label = QLabel("Symbol:")
         symbol_label.setStyleSheet("color: white; font-weight: 500;")
         layout.addWidget(symbol_label)
@@ -39,7 +39,7 @@ class ChartToolbar(QWidget):
         self.symbol_input.returnPressed.connect(self._handle_symbol_enter)
         layout.addWidget(self.symbol_input)
 
-        # === Таймфреймы как кнопки ===
+      
         tflabel = QLabel("Timeframe:")
         tflabel.setStyleSheet("color: white; font-weight: 500; margin-left: 10px;")
         layout.addWidget(tflabel)
@@ -66,7 +66,7 @@ class ChartToolbar(QWidget):
 
         self.timeframe_buttons["M30"].setChecked(True)
 
-        # === Тип графика ===
+      
         type_label = QLabel("Chart Type:")
         type_label.setStyleSheet("color: white; font-weight: 500; margin-left: 10px;")
         layout.addWidget(type_label)
@@ -87,7 +87,7 @@ class ChartToolbar(QWidget):
         """)
         layout.addWidget(self.type_box)
 
-        # === Индикаторы ===
+  
         ind_label = QLabel("Indicators:")
         ind_label.setStyleSheet("color: white; font-weight: 500; margin-left: 10px;")
         layout.addWidget(ind_label)
@@ -112,13 +112,13 @@ class ChartToolbar(QWidget):
 
         self.setStyleSheet("background-color: #1a1a1a; border-radius: 6px;")
 
-    # === Обработчик нажатия Enter ===
+
     def _handle_symbol_enter(self):
         symbol = self.symbol_input.text().strip().upper()
         if symbol:
             self.on_symbol_change(symbol)
 
-    # === Обработчик нажатия кнопки таймфрейма ===
+
     def _timeframe_clicked(self, tf):
         for b in self.timeframe_buttons.values():
             b.setChecked(False)

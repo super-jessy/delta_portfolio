@@ -97,7 +97,7 @@ class ChartCanvas(QWidget):
         ]
         self.colors = {sym: QColor(base_colors[i % len(base_colors)]) for i, sym in enumerate(symbols)}
 
-        # легенда (уменьшили интервал между тикерами)
+        # легенда (уменьшил интервал между тикерами)
         legend_x, legend_y = int(left), int(top - 12)
         for i, sym in enumerate(symbols):
             c = self.colors[sym]
@@ -134,7 +134,6 @@ class ChartCanvas(QWidget):
             painter.setPen(pen)
             painter.drawPath(path)
 
-            # сохраняем последнее значение
             if data:
                 self.last_values[sym] = data[-1][1]
                 self.last_positions[sym] = (x, y)
@@ -174,7 +173,7 @@ class ChartCanvas(QWidget):
                     data[i] = (sym, val, y)
                     adjusted = True
 
-        # Рисуем значения
+      
         for sym, val, y in data:
             color = self.colors.get(sym, QColor("#FFFFFF"))
             x = int(left + width + 5)

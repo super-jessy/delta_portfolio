@@ -78,7 +78,7 @@ def save_to_db(df: pd.DataFrame):
 
     with engine.begin() as conn:
         for ticker, tf in df[['ticker', 'timeframe']].drop_duplicates().itertuples(index=False):
-            # 1️⃣ Получаем уже существующие даты для этого тикера и ТФ
+            # Получаем уже существующие даты для этого тикера и ТФ
             existing_dates = pd.read_sql(
                 text("""
                     SELECT datetime FROM instrument_quotes
@@ -88,14 +88,14 @@ def save_to_db(df: pd.DataFrame):
                 params={"ticker": ticker, "tf": tf}
             )['datetime'].astype('datetime64[ns]')
 
-            # 2️⃣ Фильтруем только новые строки
+            # Фильтруем только новые строки
             df_filtered = df[
                 (df['ticker'] == ticker) &
                 (df['timeframe'] == tf) &
                 (~df['datetime'].isin(existing_dates))
             ]
 
-            # 3️⃣ Записываем только уникальные
+            # Записываем только уникальные
             if not df_filtered.empty:
                 df_filtered.to_sql("instrument_quotes", conn, if_exists="append", index=False)
                 print(f"[chart_service] Добавлено {len(df_filtered)} новых баров для {ticker} ({tf})")
