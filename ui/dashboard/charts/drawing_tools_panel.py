@@ -24,6 +24,7 @@ class DrawingToolsPanel(QWidget):
             ("Arrow Projection", "assets/icons/chart_page/arrow_projection.png"),
             ("Fibonacci", "assets/icons/chart_page/fibonacci.png"),
             ("Circle", "assets/icons/chart_page/circle.png"),
+            ("Ellipse", "assets/icons/chart_page/ellipse.png"),
             ("Price Range", "assets/icons/chart_page/price_range.png"),
             ("Date Range", "assets/icons/chart_page/date_range.png"),
             ("Brush", "assets/icons/chart_page/brush.png"),
