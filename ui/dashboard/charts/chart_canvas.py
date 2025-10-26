@@ -1,18 +1,20 @@
 from PyQt6.QtWidgets import QWidget
-from PyQt6.QtCore import Qt, QTimer, QPointF
+from PyQt6.QtCore import Qt, QTimer, QPointF, pyqtSignal
 from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QPainterPath
 from services.chart_service import fetch_candles
 import numpy as np
 
 
 class ChartCanvas(QWidget):
+    tool_finished = pyqtSignal()  # сигнал завершения инструмента рисования
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumHeight(480)
         self.setMouseTracking(True)
         self.setStyleSheet("background-color: #222222; border-radius: 6px;")
 
-        # --- параметры ---
+        # --- данные графика ---
         self.data = []
         self.symbol = "AAPL"
         self.timeframe = "M30"
@@ -22,9 +24,19 @@ class ChartCanvas(QWidget):
         self.cursor_pos = None
         self.active_indicators = []
 
-        # --- перетаскивание ---
+        # --- перетаскивание графика ---
         self.dragging = False
         self.last_mouse_x = None
+
+        # --- инструменты рисования ---
+        self.active_tool = None
+        self.drawing_start = None
+        # ВАЖНО: храним X в НОРМАЛИЗОВАННОМ виде (0..1), цену — в реальном значении
+        # Пример: [((0.73, 186.2), (0.82, 188.0)), ...]
+        self.persistent_drawings = []
+        self.selected_line = None
+        self.dragging_line = None
+        self.dragging_point = None  # 'start' | 'end' | 'mid'
 
         # --- отступы ---
         self.margin_left = 10
@@ -59,14 +71,104 @@ class ChartCanvas(QWidget):
         self.visible_candles = max(100, min(500, self.visible_candles))
         self.update()
 
-    # ---------- перетаскивание ----------
+    # ---------- обработка мыши ----------
     def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
+        pos = event.position()
+
+        # удаление линии (ПКМ)
+        if not self.active_tool and event.button() == Qt.MouseButton.RightButton:
+            clicked_line, _ = self._find_near_line(pos)
+            if clicked_line:
+                self.persistent_drawings.remove(clicked_line)
+                if self.selected_line == clicked_line:
+                    self.selected_line = None
+                self.update()
+                return
+
+        # выбор/захват линии (ЛКМ)
+        if not self.active_tool and event.button() == Qt.MouseButton.LeftButton:
+            clicked_line, point = self._find_near_line(pos)
+            if clicked_line:
+                self.selected_line = clicked_line
+                self.dragging_line = clicked_line
+                self.dragging_point = point  # 'start' | 'end' | 'mid'
+                # фиксируем референс для "mid"-перетаскивания
+                self._drag_ref = {"pos": pos, "orig": clicked_line}
+                self.setCursor(Qt.CursorShape.SizeAllCursor)
+                self.update()
+                return
+
+        # начало/завершение рисования трендлайна
+        if self.active_tool == "trendline" and event.button() == Qt.MouseButton.LeftButton:
+            if self.drawing_start is None:
+                idx, price = self._pixel_to_data(pos.x(), pos.y())
+                self.drawing_start = (idx, price)  # временно абсолютный индекс
+                self.update()
+                return
+            else:
+                idx, price = self._pixel_to_data(pos.x(), pos.y())
+                nx1 = self._normalize_x(self.drawing_start[0])
+                nx2 = self._normalize_x(idx)
+                self.persistent_drawings.append(((nx1, self.drawing_start[1]), (nx2, price)))
+                # Завершение инструмента — СРАЗУ выходим, чтобы не стартовать drag графика
+                self.drawing_start = None
+                self.active_tool = None
+                self.tool_finished.emit()
+                self.update()
+                return
+
+        # перетаскивание графика (если не рисуем и не тащим линию)
+        if event.button() == Qt.MouseButton.LeftButton and not self.dragging_line:
             self.dragging = True
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
-            self.last_mouse_x = event.position().x()
+            self.last_mouse_x = pos.x()
+
+        # клик мимо объектов — снять выделение
+        if event.button() == Qt.MouseButton.LeftButton and not self.active_tool and not self.dragging_line:
+            clicked_line, _ = self._find_near_line(pos)
+            if not clicked_line:
+                self.selected_line = None
+                self.update()
 
     def mouseMoveEvent(self, event):
+        if self.dragging_line:
+            pos = event.position()
+            ((x1, p1), (x2, p2)) = self.dragging_line  # здесь x1/x2 — НОРМАЛИЗОВАНЫ
+
+            if self.dragging_point == "start":
+                ix, pr = self._pixel_to_data(pos.x(), pos.y())
+                new_line = ((self._normalize_x(ix), pr), (x2, p2))
+            elif self.dragging_point == "end":
+                ix, pr = self._pixel_to_data(pos.x(), pos.y())
+                new_line = ((x1, p1), (self._normalize_x(ix), pr))
+            else:  # mid — перенос всей линии
+                # гарантируем, что есть референс начального состояния
+                if not hasattr(self, "_drag_ref"):
+                    self._drag_ref = {"pos": pos, "orig": self.dragging_line}
+
+                dx = pos.x() - self._drag_ref["pos"].x()
+                dy = pos.y() - self._drag_ref["pos"].y()
+
+                (ox1, op1), (ox2, op2) = self._drag_ref["orig"]
+                # в пиксели — только через ДЕнормализацию X
+                sx1, sy1 = self._data_to_pixel(self._denormalize_x(ox1), op1)
+                sx2, sy2 = self._data_to_pixel(self._denormalize_x(ox2), op2)
+
+                new_x1, new_y1 = sx1 + dx, sy1 + dy
+                new_x2, new_y2 = sx2 + dx, sy2 + dy
+
+                ix1, pr1 = self._pixel_to_data(new_x1, new_y1)
+                ix2, pr2 = self._pixel_to_data(new_x2, new_y2)
+                new_line = ((self._normalize_x(ix1), pr1), (self._normalize_x(ix2), pr2))
+
+            # зафиксировать изменения
+            idx = self.persistent_drawings.index(self.dragging_line)
+            self.persistent_drawings[idx] = new_line
+            self.dragging_line = new_line
+            self.selected_line = new_line
+            self.update()
+            return
+
         if self.dragging and self.last_mouse_x is not None:
             dx = int(event.position().x() - self.last_mouse_x)
             self.last_mouse_x = event.position().x()
@@ -79,6 +181,14 @@ class ChartCanvas(QWidget):
             self.update()
 
     def mouseReleaseEvent(self, event):
+        if hasattr(self, "_drag_ref"):
+            del self._drag_ref
+        if self.dragging_line:
+            # закончить перенос/редактирование линии
+            self.dragging_line = None
+            self.dragging_point = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            return
         if event.button() == Qt.MouseButton.LeftButton:
             self.dragging = False
             self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -106,18 +216,13 @@ class ChartCanvas(QWidget):
         start_idx = max(0, total - self.visible_candles - self.scroll_offset)
         end_idx = min(total, total - self.scroll_offset)
         subset = self.data[start_idx:end_idx]
-
-        if len(subset) > self.visible_candles:
-            subset = subset[-self.visible_candles:]
-
         if not subset:
             return
 
         closes = [c[4] for c in subset]
         highs = [c[2] for c in subset]
         lows = [c[3] for c in subset]
-        min_price = min(lows)
-        max_price = max(highs)
+        min_price, max_price = min(lows), max(highs)
         price_range = max_price - min_price if max_price > min_price else 1
         candle_width = width / self.visible_candles
 
@@ -127,7 +232,7 @@ class ChartCanvas(QWidget):
         painter.setPen(pen)
         for i in range(5):
             y = int(top + i * (height / 4))
-            painter.drawLine(int(left), y, int(left + width), y)
+            painter.drawLine(int(left), int(y), int(left + width), int(y))
 
         # --- ось X ---
         painter.setFont(self.font)
@@ -147,13 +252,11 @@ class ChartCanvas(QWidget):
                 y_close = top + height - ((c - min_price) / price_range) * height
                 y_high = top + height - ((h - min_price) / price_range) * height
                 y_low = top + height - ((l - min_price) / price_range) * height
-
                 color = QColor("#A2DD84") if c >= o else QColor("#FF4D4D")
                 pen = QPen(color, 1)
                 painter.setPen(pen)
                 painter.drawLine(int(x + candle_width / 2), int(y_high), int(x + candle_width / 2), int(y_low))
-                painter.fillRect(int(x), int(min(y_open, y_close)), int(candle_width - 1),
-                                 int(abs(y_close - y_open)), color)
+                painter.fillRect(int(x), int(min(y_open, y_close)), int(candle_width - 1), int(abs(y_close - y_open)), color)
         else:
             path = QPainterPath()
             path.moveTo(left, top + height - ((closes[0] - min_price) / price_range) * height)
@@ -191,7 +294,123 @@ class ChartCanvas(QWidget):
             if left < cx < left + width and top < cy < top + height:
                 self.draw_crosshair(painter, cx, cy, subset, left, top, width, height, min_price, price_range, candle_width)
 
-    # ---------- Индикаторы ----------
+        # --- линии (используем ДЕ-нормализацию X при отрисовке) ---
+        painter.setPen(QPen(QColor("#A2DD84"), 1.8))
+        for line in self.persistent_drawings:
+            ((x1, p1), (x2, p2)) = line
+            sx1, sy1 = self._data_to_pixel(self._denormalize_x(x1), p1)
+            sx2, sy2 = self._data_to_pixel(self._denormalize_x(x2), p2)
+            painter.drawLine(int(sx1), int(sy1), int(sx2), int(sy2))
+            if line == self.selected_line:
+                painter.setBrush(QColor("#A2DD84"))
+                painter.drawEllipse(int(sx1) - 3, int(sy1) - 3, 6, 6)
+                painter.drawEllipse(int(sx2) - 3, int(sy2) - 3, 6, 6)
+
+        # --- временная линия при рисовании ---
+        if self.active_tool == "trendline" and self.drawing_start and self.cursor_pos:
+            painter.setPen(QPen(QColor("#A2DD84"), 1.2, Qt.PenStyle.DashLine))
+            start_x, start_y = self._data_to_pixel(*self.drawing_start)
+            end_idx, end_price = self._pixel_to_data(self.cursor_pos.x(), self.cursor_pos.y())
+            end_x, end_y = self._data_to_pixel(end_idx, end_price)
+            painter.drawLine(int(start_x), int(start_y), int(end_x), int(end_y))
+
+    # ---------- служебные функции ----------
+    def _data_to_pixel(self, x_idx, price):
+        if not self.data:
+            return 0, 0
+        rect = self.rect()
+        left, top = self.margin_left, self.margin_top
+        width = rect.width() - self.margin_left - self.margin_right
+        height = rect.height() - self.margin_top - self.margin_bottom
+        candle_width = width / self.visible_candles
+        min_price, max_price = self._price_range()
+        rng = max(max_price - min_price, 1e-9)
+        y = top + height - ((price - min_price) / rng) * height
+        x = left + (x_idx - (len(self.data) - self.visible_candles - self.scroll_offset)) * candle_width
+        return x, y
+
+    def _pixel_to_data(self, x, y):
+        rect = self.rect()
+        left, top = self.margin_left, self.margin_top
+        width = rect.width() - self.margin_left - self.margin_right
+        height = rect.height() - self.margin_top - self.margin_bottom
+        candle_width = width / self.visible_candles
+        min_price, max_price = self._price_range()
+        rng = max(max_price - min_price, 1e-9)
+        price = max_price - ((y - top) / height) * rng
+        idx = int((x - left) / candle_width) + (len(self.data) - self.visible_candles - self.scroll_offset)
+        # ограничим в пределах массива
+        idx = max(0, min(len(self.data) - 1, idx)) if self.data else 0
+        return idx, price
+
+    def _normalize_x(self, idx):
+        total = len(self.data)
+        if not total:
+            return 0.0
+        # clamp на всякий случай
+        return max(0.0, min(1.0, idx / total))
+
+    def _denormalize_x(self, norm_x):
+        total = len(self.data)
+        if not total:
+            return 0
+        # clamp и перевод обратно в индекс
+        nx = max(0.0, min(1.0, float(norm_x)))
+        return int(nx * (total - 1))
+
+    def _price_range(self):
+        if not self.data:
+            return 0, 1
+        highs = [c[2] for c in self.data]
+        lows = [c[3] for c in self.data]
+        return min(lows), max(highs)
+
+    def _find_near_line(self, pos, tolerance=8):
+        x, y = pos.x(), pos.y()
+        for line in reversed(self.persistent_drawings):
+            ((x1, p1), (x2, p2)) = line
+            # ДЕ-нормализуем X для перевода в пиксели
+            sx1, sy1 = self._data_to_pixel(self._denormalize_x(x1), p1)
+            sx2, sy2 = self._data_to_pixel(self._denormalize_x(x2), p2)
+            if abs(sx1 - x) < tolerance and abs(sy1 - y) < tolerance:
+                return line, "start"
+            if abs(sx2 - x) < tolerance and abs(sy2 - y) < tolerance:
+                return line, "end"
+            if self._distance_point_to_segment(x, y, sx1, sy1, sx2, sy2) < tolerance:
+                return line, "mid"
+        return None, None
+
+    def _distance_point_to_segment(self, px, py, x1, y1, x2, y2):
+        vx, vy = x2 - x1, y2 - y1
+        wx, wy = px - x1, py - y1
+        c1 = wx * vx + wy * vy
+        if c1 <= 0:
+            return ((px - x1) ** 2 + (py - y1) ** 2) ** 0.5
+        c2 = vx * vx + vy * vy
+        if c2 <= c1:
+            return ((px - x2) ** 2 + (py - y2) ** 2) ** 0.5
+        b = c1 / c2 if c2 else 0
+        bx, by = x1 + b * vx, y1 + b * vy
+        return ((px - bx) ** 2 + (py - by) ** 2) ** 0.5
+
+    # ---------- crosshair ----------
+    def draw_crosshair(self, painter, cx, cy, data, left, top, width, height, min_price, price_range, candle_width):
+        painter.setPen(QPen(QColor("#A2DD84"), 1, Qt.PenStyle.DashLine))
+        painter.drawLine(cx, top, cx, top + height)
+        painter.drawLine(left, cy, left + width, cy)
+
+        idx = int((cx - left) / candle_width)
+        if 0 <= idx < len(data):
+            dt = data[idx][0].strftime("%d %b %H:%M")
+            price = min_price + (height - (cy - top)) / height * price_range
+            painter.setBrush(QColor(30, 30, 30, 220))
+            painter.setPen(QColor("#A2DD84"))
+            painter.drawRoundedRect(cx - 45, top + height + 5, 90, 18, 3, 3)
+            painter.drawText(cx - 40, top + height + 18, dt)
+            painter.drawRoundedRect(left + width + 2, cy - 8, 50, 16, 3, 3)
+            painter.drawText(left + width + 8, cy + 5, f"{price:.2f}")
+
+    # ---------- индикаторы ----------
     def apply_indicator(self, indicator_name):
         if indicator_name == "None":
             self.active_indicators.clear()
@@ -252,19 +471,10 @@ class ChartCanvas(QWidget):
         painter.setPen(QPen(color, 1.5))
         painter.drawPath(path)
 
-    # ---------- crosshair ----------
-    def draw_crosshair(self, painter, cx, cy, data, left, top, width, height, min_price, price_range, candle_width):
-        painter.setPen(QPen(QColor("#A2DD84"), 1, Qt.PenStyle.DashLine))
-        painter.drawLine(cx, top, cx, top + height)
-        painter.drawLine(left, cy, left + width, cy)
-
-        idx = int((cx - left) / candle_width)
-        if 0 <= idx < len(data):
-            dt = data[idx][0].strftime("%d %b %H:%M")
-            price = min_price + (height - (cy - top)) / height * price_range
-            painter.setBrush(QColor(30, 30, 30, 220))
-            painter.setPen(QColor("#A2DD84"))
-            painter.drawRoundedRect(cx - 45, top + height + 5, 90, 18, 3, 3)
-            painter.drawText(cx - 40, top + height + 18, dt)
-            painter.drawRoundedRect(left + width + 2, cy - 8, 50, 16, 3, 3)
-            painter.drawText(left + width + 8, cy + 5, f"{price:.2f}")
+    # ---------- выбор инструмента ----------
+    def set_drawing_tool(self, tool_name):
+        if tool_name:
+            self.active_tool = tool_name.lower()
+        else:
+            self.active_tool = None
+        self.update()

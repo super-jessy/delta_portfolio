@@ -1,8 +1,10 @@
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QPushButton
 from PyQt6.QtGui import QIcon
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt, QSize, pyqtSignal
 
 class DrawingToolsPanel(QWidget):
+    tool_selected = pyqtSignal(str)
+    
     def __init__(self, parent=None):
         super().__init__(parent)
 
@@ -67,7 +69,22 @@ class DrawingToolsPanel(QWidget):
         layout.addStretch()
 
     def on_tool_selected(self, selected_button):
-        """Активирует выбранный инструмент и деактивирует остальные"""
+        """Активирует выбранный инструмент и деактивирует остальные, поддерживает toggle"""
+        if selected_button.isChecked():
+            # Выбрали новый инструмент
+            for btn in self.buttons:
+                if btn is not selected_button:
+                    btn.setChecked(False)
+            tool_name = selected_button.toolTip()
+            self.tool_selected.emit(tool_name)
+        else:
+            # Повторное нажатие по активной кнопке — выключаем инструмент
+            self.tool_selected.emit(None)
+        
+    def deactivate_all(self):
+        """Снимает визуальное выделение без вызова нового сигнала"""
+        # Просто убираем подсветку кнопок, не отправляя signal
         for btn in self.buttons:
-            if btn is not selected_button:
-                btn.setChecked(False)
+            btn.blockSignals(True)
+            btn.setChecked(False)
+            btn.blockSignals(False)

@@ -9,12 +9,11 @@ class ChartsPage(QWidget):
     def __init__(self):
         super().__init__()
 
-    
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(10, 8, 10, 10)
         main_layout.setSpacing(8)
 
-      
+        # ----- Верхняя панель инструментов -----
         toolbar = QFrame()
         toolbar.setObjectName("toolbar")
         toolbar.setStyleSheet("""
@@ -30,10 +29,10 @@ class ChartsPage(QWidget):
         tl.setContentsMargins(12, 6, 12, 6)
         tl.setSpacing(10)
 
-        # Symbol
+        # Поле для ввода тикера
         self.symbol_input = QLineEdit()
         self.symbol_input.setPlaceholderText("Enter ticker (e.g. AAPL)")
-        self.symbol_input.setFixedWidth(220)  # не растягиваем
+        self.symbol_input.setFixedWidth(220)
         self.symbol_input.setStyleSheet("""
             QLineEdit {
                 background-color: #2A2A2A;
@@ -46,11 +45,9 @@ class ChartsPage(QWidget):
             QLineEdit:focus { border: 1px solid #A2DD84; }
         """)
         self.symbol_input.returnPressed.connect(self._on_symbol_enter)
-
         tl.addWidget(self.symbol_input)
 
-        # Timeframes (кнопки)
-
+        # Кнопки таймфреймов
         self.timeframe_buttons = {}
         for tf in ["M1", "M5", "M15", "M30", "H1", "D1"]:
             btn = QPushButton(tf)
@@ -72,11 +69,12 @@ class ChartsPage(QWidget):
             tl.addWidget(btn)
         self.timeframe_buttons["M30"].setChecked(True)
 
-        # кастомные dropdowns
+        # Dropdown для выбора типа графика
         self.dd_chart_type = CustomDropdown("Chart Type", ["Candlestick", "Line"], "Candlestick", parent=toolbar)
         self.dd_chart_type.changed.connect(self._on_chart_type_change)
         tl.addWidget(self.dd_chart_type)
 
+        # Dropdown для индикаторов
         self.dd_indicators = CustomDropdown("Indicators", ["None", "EMA 25", "EMA 100", "EMA 200"], "None", parent=toolbar)
         self.dd_indicators.changed.connect(self._on_indicator_change)
         tl.addWidget(self.dd_indicators)
@@ -84,34 +82,38 @@ class ChartsPage(QWidget):
         tl.addStretch()
         main_layout.addWidget(toolbar)
 
-       
+        # Разделительная линия
         sep = QFrame()
         sep.setFixedHeight(1)
         sep.setStyleSheet("background-color: #2b2b2b;")
         main_layout.addWidget(sep)
 
-      
+        # ----- Нижняя часть: панель инструментов + график -----
         bottom = QHBoxLayout()
         bottom.setContentsMargins(0, 0, 0, 0)
         bottom.setSpacing(6)
 
-    
+        # Левая панель инструментов рисования
         self.tools_panel = DrawingToolsPanel()
         self.tools_panel.setFixedWidth(60)
         bottom.addWidget(self.tools_panel)
 
-        # график
+        # Сам график
         self.chart = ChartCanvas()
         bottom.addWidget(self.chart, stretch=1)
 
         main_layout.addLayout(bottom)
 
-        # дефолт
+        # 🔗 Подключаем панель инструментов к графику
+        self.tools_panel.tool_selected.connect(self.chart.set_drawing_tool)
+        self.chart.tool_finished.connect(self.tools_panel.deactivate_all)
+
+        # ----- Значения по умолчанию -----
         self.chart.symbol = "AAPL"
         self.chart.timeframe = "M30"
         self.chart.update_data()
 
-
+    # ----- Обработчики -----
     def _on_symbol_enter(self):
         sym = self.symbol_input.text().strip().upper()
         if not sym:
