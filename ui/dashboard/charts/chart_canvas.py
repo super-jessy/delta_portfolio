@@ -21,15 +21,12 @@ class ChartCanvas(QWidget):
         self.chart_type = "Candlestick"
         self.visible_candles = 150
         self.scroll_offset = 0
-        self.vertical_offset = 0
-        self.last_mouse_y = None
         self.cursor_pos = None
         self.active_indicators = []
 
         # --- перетаскивание графика ---
         self.dragging = False
         self.last_mouse_x = None
-        self.last_mouse_y = None
 
         # --- инструменты рисования ---
         self.active_tool = None
@@ -121,11 +118,10 @@ class ChartCanvas(QWidget):
                 return
 
         # перетаскивание графика (если не рисуем и не тащим линию)
-        if event.button() == Qt.MouseButton.LeftButton:
-           self.dragging = True
-           self.setCursor(Qt.CursorShape.ClosedHandCursor)
-           self.last_mouse_x = pos.x()
-           self.last_mouse_y = pos.y()
+        if event.button() == Qt.MouseButton.LeftButton and not self.dragging_line:
+            self.dragging = True
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            self.last_mouse_x = pos.x()
 
         # клик мимо объектов — снять выделение
         if event.button() == Qt.MouseButton.LeftButton and not self.active_tool and not self.dragging_line:
@@ -174,21 +170,15 @@ class ChartCanvas(QWidget):
             return
 
         if self.dragging and self.last_mouse_x is not None:
-           dx = int(event.position().x() - self.last_mouse_x)
-           dy = int(event.position().y() - self.last_mouse_y)
-           self.last_mouse_x = event.position().x()
-           self.last_mouse_y = event.position().y()
-
-           self.scroll_offset += int(dx * 0.5)
-           max_offset = max(0, len(self.data) - self.visible_candles)
-           self.scroll_offset = max(0, min(max_offset, self.scroll_offset))
-
-           self.vertical_offset += dy
-           self.update()
+            dx = int(event.position().x() - self.last_mouse_x)
+            self.last_mouse_x = event.position().x()
+            self.scroll_offset += int(dx * 0.5)
+            max_offset = max(0, len(self.data) - self.visible_candles)
+            self.scroll_offset = max(0, min(max_offset, self.scroll_offset))
+            self.update()
         else:
-           self.cursor_pos = event.position()
-           self.update()
-
+            self.cursor_pos = event.position()
+            self.update()
 
     def mouseReleaseEvent(self, event):
         if hasattr(self, "_drag_ref"):
@@ -200,10 +190,9 @@ class ChartCanvas(QWidget):
             self.setCursor(Qt.CursorShape.ArrowCursor)
             return
         if event.button() == Qt.MouseButton.LeftButton:
-           self.dragging = False
-           self.setCursor(Qt.CursorShape.ArrowCursor)
-           self.last_mouse_x = None
-           self.last_mouse_y = None
+            self.dragging = False
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.last_mouse_x = None
 
     def leaveEvent(self, event):
         self.cursor_pos = None
@@ -230,13 +219,10 @@ class ChartCanvas(QWidget):
         if not subset:
             return
 
-        if not hasattr(self, "_fixed_min_price") or not hasattr(self, "_fixed_max_price"):
-           highs = [c[2] for c in subset]
-           lows = [c[3] for c in subset]
-           self._fixed_min_price, self._fixed_max_price = min(lows), max(highs)
-
         closes = [c[4] for c in subset]
-        min_price, max_price = self._fixed_min_price, self._fixed_max_price
+        highs = [c[2] for c in subset]
+        lows = [c[3] for c in subset]
+        min_price, max_price = min(lows), max(highs)
         price_range = max_price - min_price if max_price > min_price else 1
         candle_width = width / self.visible_candles
 
@@ -261,16 +247,11 @@ class ChartCanvas(QWidget):
         # --- свечи / линия ---
         if self.chart_type == "Candlestick":
             for i, (dt, o, h, l, c) in enumerate(subset):
-                x = left + i * candle_width - 20
+                x = left + i * candle_width
                 y_open = top + height - ((o - min_price) / price_range) * height
                 y_close = top + height - ((c - min_price) / price_range) * height
                 y_high = top + height - ((h - min_price) / price_range) * height
                 y_low = top + height - ((l - min_price) / price_range) * height
-                y_open += self.vertical_offset
-                y_close += self.vertical_offset
-                y_high += self.vertical_offset
-                y_low += self.vertical_offset
-
                 color = QColor("#A2DD84") if c >= o else QColor("#FF4D4D")
                 pen = QPen(color, 1)
                 painter.setPen(pen)
@@ -319,9 +300,6 @@ class ChartCanvas(QWidget):
             ((x1, p1), (x2, p2)) = line
             sx1, sy1 = self._data_to_pixel(self._denormalize_x(x1), p1)
             sx2, sy2 = self._data_to_pixel(self._denormalize_x(x2), p2)
-            sy1 += self.vertical_offset
-            sy2 += self.vertical_offset
-
             painter.drawLine(int(sx1), int(sy1), int(sx2), int(sy2))
             if line == self.selected_line:
                 painter.setBrush(QColor("#A2DD84"))
@@ -338,29 +316,32 @@ class ChartCanvas(QWidget):
 
     # ---------- служебные функции ----------
     def _data_to_pixel(self, x_idx, price):
-      if not self.data:
-          return 0, 0
-      rect = self.rect()
-      left, top = self.margin_left, self.margin_top
-      width = rect.width() - self.margin_left - self.margin_right
-      height = rect.height() - self.margin_top - self.margin_bottom
-      candle_width = width / self.visible_candles
-      min_price, max_price = self._price_range()
-      y = top + height - ((price - min_price) / (max_price - min_price)) * height + self.vertical_offset
-      x = left + (x_idx - (len(self.data) - self.visible_candles - self.scroll_offset)) * candle_width + 20
-      return x, y
+        if not self.data:
+            return 0, 0
+        rect = self.rect()
+        left, top = self.margin_left, self.margin_top
+        width = rect.width() - self.margin_left - self.margin_right
+        height = rect.height() - self.margin_top - self.margin_bottom
+        candle_width = width / self.visible_candles
+        min_price, max_price = self._price_range()
+        rng = max(max_price - min_price, 1e-9)
+        y = top + height - ((price - min_price) / rng) * height
+        x = left + (x_idx - (len(self.data) - self.visible_candles - self.scroll_offset)) * candle_width
+        return x, y
 
     def _pixel_to_data(self, x, y):
-      rect = self.rect()
-      left, top = self.margin_left, self.margin_top
-      width = rect.width() - self.margin_left - self.margin_right
-      height = rect.height() - self.margin_top - self.margin_bottom
-      candle_width = width / self.visible_candles
-      min_price, max_price = self._price_range()
-      price = max_price - ((y - top - self.vertical_offset) / height) * (max_price - min_price)
-      idx = int((x - left - 20) / candle_width) + (len(self.data) - self.visible_candles - self.scroll_offset)
-      return idx, price
-
+        rect = self.rect()
+        left, top = self.margin_left, self.margin_top
+        width = rect.width() - self.margin_left - self.margin_right
+        height = rect.height() - self.margin_top - self.margin_bottom
+        candle_width = width / self.visible_candles
+        min_price, max_price = self._price_range()
+        rng = max(max_price - min_price, 1e-9)
+        price = max_price - ((y - top) / height) * rng
+        idx = int((x - left) / candle_width) + (len(self.data) - self.visible_candles - self.scroll_offset)
+        # ограничим в пределах массива
+        idx = max(0, min(len(self.data) - 1, idx)) if self.data else 0
+        return idx, price
 
     def _normalize_x(self, idx):
         total = len(self.data)
@@ -414,7 +395,6 @@ class ChartCanvas(QWidget):
 
     # ---------- crosshair ----------
     def draw_crosshair(self, painter, cx, cy, data, left, top, width, height, min_price, price_range, candle_width):
-        cy += self.vertical_offset
         painter.setPen(QPen(QColor("#A2DD84"), 1, Qt.PenStyle.DashLine))
         painter.drawLine(cx, top, cx, top + height)
         painter.drawLine(left, cy, left + width, cy)
