@@ -75,7 +75,7 @@ class ChartsPage(QWidget):
         tl.addWidget(self.dd_chart_type)
 
         # Dropdown для индикаторов
-        self.dd_indicators = CustomDropdown("Indicators", ["None", "EMA 25", "EMA 100", "EMA 200"], "None", parent=toolbar)
+        self.dd_indicators = CustomDropdown("Indicators", ["None", "EMA 25", "EMA 100", "EMA 200", "SMA 50", "EMA Cross", "Bollinger Bands", "RSI"], "None", parent=toolbar)
         self.dd_indicators.changed.connect(self._on_indicator_change)
         tl.addWidget(self.dd_indicators)
 

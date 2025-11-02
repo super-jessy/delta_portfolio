@@ -410,65 +410,194 @@ class ChartCanvas(QWidget):
             painter.drawRoundedRect(left + width + 2, cy - 8, 50, 16, 3, 3)
             painter.drawText(left + width + 8, cy + 5, f"{price:.2f}")
 
-    # ---------- индикаторы ----------
+
+    # ===== INDICATORS =====
     def apply_indicator(self, indicator_name):
-        if indicator_name == "None":
-            self.active_indicators.clear()
-            self.update()
-            return
-        self.active_indicators = [indicator_name]
+        self.active_indicators = [indicator_name] if indicator_name and indicator_name != "None" else []
         self.update()
 
     def draw_indicator(self, painter, indicator_name, subset, rect, min_price, price_range, candle_width, start_idx):
+        if not self.data:
+            return
+
         if indicator_name.startswith("EMA"):
-            period = int(indicator_name.split(" ")[1])
-            self.draw_ema(painter, self.data, period, QColor("#00BFFF"), subset, rect, min_price, price_range, candle_width, start_idx)
-        elif indicator_name.startswith("SMA"):
-            period = int(indicator_name.split(" ")[1])
-            self.draw_sma(painter, self.data, period, QColor("#FFB347"), subset, rect, min_price, price_range, candle_width, start_idx)
-
-    def draw_ema(self, painter, all_data, period, color, subset, rect, min_price, price_range, candle_width, start_idx):
-        if len(all_data) < period:
-            return
-        closes = [c[4] for c in all_data]
-        ema_values = []
-        k = 2 / (period + 1)
-        ema = closes[0]
-        ema_values.append(ema)
-        for price in closes[1:]:
-            ema = price * k + ema * (1 - k)
-            ema_values.append(ema)
-
-        ema_visible = ema_values[start_idx:start_idx + len(subset)]
-        left, top = self.margin_left, self.margin_top
-        height = rect.height() - self.margin_top - self.margin_bottom
-        path = QPainterPath()
-        for i, ema_val in enumerate(ema_visible):
-            x = left + i * candle_width
-            y = top + height - ((ema_val - min_price) / price_range) * height
-            if i == 0:
-                path.moveTo(QPointF(x, y))
+            if indicator_name == "EMA Cross":
+                self._draw_ema_cross(painter, rect, min_price, price_range, candle_width, start_idx)
             else:
-                path.lineTo(QPointF(x, y))
-        painter.setPen(QPen(color, 1.5))
-        painter.drawPath(path)
+                period = int(indicator_name.split(" ")[1])
+                self._draw_ema(painter, period, rect, min_price, price_range, candle_width, start_idx)
 
-    def draw_sma(self, painter, all_data, period, color, subset, rect, min_price, price_range, candle_width, start_idx):
-        if len(all_data) < period:
+        elif indicator_name.startswith("SMA"):
+            self._draw_sma(painter, 50, rect, min_price, price_range, candle_width, start_idx)
+
+        elif indicator_name == "Bollinger Bands":
+            self._draw_bollinger(painter, rect, min_price, price_range, candle_width, start_idx)
+
+        elif indicator_name == "RSI":
+            self._draw_rsi(painter, rect, candle_width, start_idx)
+
+    # === EMA ===
+    def _ema_series(self, closes, period):
+        if len(closes) < period:
+            return []
+        ema = [closes[0]]
+        k = 2 / (period + 1)
+        for price in closes[1:]:
+            ema.append(price * k + ema[-1] * (1 - k))
+        return np.array(ema)
+
+    def _draw_ema(self, painter, period, rect, min_price, price_range, candle_width, start_idx):
+        closes = np.array([c[4] for c in self.data])
+        ema = self._ema_series(closes, period)
+        if len(ema) == 0:
             return
-        closes = np.array([c[4] for c in all_data])
-        sma = np.convolve(closes, np.ones(period) / period, mode="valid")
         left, top = self.margin_left, self.margin_top
         height = rect.height() - self.margin_top - self.margin_bottom
+        s = start_idx
+        e = min(len(ema), start_idx + self.visible_candles)
         path = QPainterPath()
-        for i, val in enumerate(sma[start_idx:start_idx + len(subset)]):
-            x = left + (i + period - 1) * candle_width
-            y = top + height - ((val - min_price) / price_range) * height
-            if i == 0:
+        for i in range(s, e):
+            x = left + (i - start_idx) * candle_width
+            y = top + height - ((ema[i] - min_price) / price_range) * height
+            if i == s:
                 path.moveTo(x, y)
             else:
                 path.lineTo(x, y)
-        painter.setPen(QPen(color, 1.5))
+        painter.setPen(QPen(QColor("#00BFFF"), 1.5))
+        painter.drawPath(path)
+
+    # === SMA ===
+    def _draw_sma(self, painter, period, rect, min_price, price_range, candle_width, start_idx):
+        closes = np.array([c[4] for c in self.data])
+        if len(closes) < period:
+            return
+        sma = np.convolve(closes, np.ones(period) / period, mode='valid')
+        first_index = period - 1
+        left, top = self.margin_left, self.margin_top
+        height = rect.height() - self.margin_top - self.margin_bottom
+        path = QPainterPath()
+        for i in range(len(sma)):
+            global_idx = i + first_index
+            if global_idx < start_idx:
+                continue
+            if global_idx >= start_idx + self.visible_candles:
+                break
+            x = left + (global_idx - start_idx) * candle_width
+            y = top + height - ((sma[i] - min_price) / price_range) * height
+            if path.isEmpty():
+                path.moveTo(x, y)
+            else:
+                path.lineTo(x, y)
+        painter.setPen(QPen(QColor("#FFB347"), 1.5))
+        painter.drawPath(path)
+
+    # === EMA CROSS ===
+    def _draw_ema_cross(self, painter, rect, min_price, price_range, candle_width, start_idx):
+        closes = np.array([c[4] for c in self.data])
+        if len(closes) < 200:
+            return
+        ema50 = self._ema_series(closes, 50)
+        ema200 = self._ema_series(closes, 200)
+        left, top = self.margin_left, self.margin_top
+        height = rect.height() - self.margin_top - self.margin_bottom
+
+        def draw_line(series, color):
+            path = QPainterPath()
+            for i in range(start_idx, min(len(series), start_idx + self.visible_candles)):
+                x = left + (i - start_idx) * candle_width
+                y = top + height - ((series[i] - min_price) / price_range) * height
+                if i == start_idx:
+                    path.moveTo(x, y)
+                else:
+                    path.lineTo(x, y)
+            painter.setPen(QPen(color, 1.5))
+            painter.drawPath(path)
+
+        draw_line(ema50, QColor("#00BFFF"))
+        draw_line(ema200, QColor("#FFD700"))
+
+    # === Bollinger Bands ===
+    def _draw_bollinger(self, painter, rect, min_price, price_range, candle_width, start_idx, period=20, std_dev=2):
+        closes = np.array([c[4] for c in self.data])
+        if len(closes) < period:
+            return
+        sma = np.convolve(closes, np.ones(period) / period, mode='valid')
+        stds = np.array([np.std(closes[i - period:i]) if i >= period else np.nan for i in range(len(closes))])[period - 1:]
+        upper = sma + std_dev * stds
+        lower = sma - std_dev * stds
+        first_index = period - 1
+        left, top = self.margin_left, self.margin_top
+        height = rect.height() - self.margin_top - self.margin_bottom
+
+        path = QPainterPath()
+        for i in range(len(upper)):
+            idx = i + first_index
+            if idx < start_idx:
+                continue
+            if idx >= start_idx + self.visible_candles:
+                break
+            x = left + (idx - start_idx) * candle_width
+            y = top + height - ((upper[i] - min_price) / price_range) * height
+            if path.isEmpty():
+                path.moveTo(x, y)
+            else:
+                path.lineTo(x, y)
+        for i in reversed(range(len(lower))):
+            idx = i + first_index
+            if idx < start_idx or idx >= start_idx + self.visible_candles:
+                continue
+            x = left + (idx - start_idx) * candle_width
+            y = top + height - ((lower[i] - min_price) / price_range) * height
+            path.lineTo(x, y)
+        painter.setBrush(QColor(100, 100, 255, 40))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawPath(path)
+        painter.setPen(QPen(QColor("#A2DD84"), 1.2))
+        painter.drawLine(left, top, left, top + height)
+
+    # === RSI ===
+    def _draw_rsi(self, painter, rect, candle_width, start_idx, period=14):
+        closes = np.array([c[4] for c in self.data])
+        if len(closes) < period + 1:
+            return
+        deltas = np.diff(closes)
+        gain = np.where(deltas > 0, deltas, 0)
+        loss = np.where(deltas < 0, -deltas, 0)
+        avg_gain = np.convolve(gain, np.ones(period) / period, mode='valid')
+        avg_loss = np.convolve(loss, np.ones(period) / period, mode='valid')
+        rs = np.divide(avg_gain, avg_loss, out=np.zeros_like(avg_gain), where=avg_loss != 0)
+        rsi = 100 - (100 / (1 + rs))
+        first_idx = period
+        left = self.margin_left
+        top = rect.height() * 0.8
+        height = rect.height() * 0.18
+        right = rect.width() - self.margin_right
+
+        # рамка
+        painter.setPen(QPen(QColor("#444444"), 1))
+        painter.drawRect(int(left), int(top), int(right - left), int(height))
+
+        # уровни 30/70
+        for level in (30, 70):
+            y = top + height - (level / 100) * height
+            painter.setPen(QPen(QColor("#555555"), 1, Qt.PenStyle.DashLine))
+            painter.drawLine(int(left), int(y), int(right), int(y))
+
+        # линия RSI
+        painter.setPen(QPen(QColor("#A2DD84"), 1.5))
+        path = QPainterPath()
+        for i in range(len(rsi)):
+            idx = i + first_idx
+            if idx < start_idx:
+                continue
+            if idx >= start_idx + self.visible_candles:
+                break
+            x = left + (idx - start_idx) * candle_width
+            y = top + height - (rsi[i] / 100) * height
+            if path.isEmpty():
+                path.moveTo(x, y)
+            else:
+                path.lineTo(x, y)
         painter.drawPath(path)
 
     # ---------- выбор инструмента ----------

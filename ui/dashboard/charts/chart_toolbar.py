@@ -93,7 +93,16 @@ class ChartToolbar(QWidget):
         layout.addWidget(ind_label)
 
         self.indicators_box = QComboBox()
-        self.indicators_box.addItems(["None", "EMA 10", "EMA 50", "EMA 200", "SMA 50"])
+        self.indicators_box.addItems([
+            "None", 
+            "EMA 10", 
+            "EMA 50", 
+            "EMA 200", 
+            "SMA 50",
+            "EMA Cross",
+            "Bollinger Bands",
+            "RSI"
+        ])
         self.indicators_box.currentTextChanged.connect(self.on_indicator_change)
         self.indicators_box.setStyleSheet("""
             QComboBox {
